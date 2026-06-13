@@ -23,6 +23,7 @@ interface Task {
   prUrl: string | null
   prError: string | null
   error: string | null
+  worktreeRemoved: number
   pendingQuestion: string | null
   deskIndex: number | null
 }
@@ -32,6 +33,7 @@ function App() {
   const [projects, setProjects] = useState<Project[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [pathInput, setPathInput] = useState('')
+  const [projectSource, setProjectSource] = useState<'path' | 'url'>('path')
   const [error, setError] = useState<string | null>(null)
 
   const [taskProjectId, setTaskProjectId] = useState('')
@@ -93,7 +95,7 @@ function App() {
     const res = await fetch('/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source: 'path', value: pathInput }),
+      body: JSON.stringify({ source: projectSource, value: pathInput }),
     })
 
     if (!res.ok) {
@@ -141,6 +143,11 @@ function App() {
     loadTasks()
   }
 
+  const removeWorktree = async (taskId: string) => {
+    await fetch(`/api/tasks/${taskId}/worktree`, { method: 'DELETE' })
+    loadTasks()
+  }
+
   const activeTasks = tasks.filter((t) => t.status !== 'done' && t.status !== 'failed')
   const completedTasks = tasks.filter((t) => t.status === 'done')
   const failedTasks = tasks.filter((t) => t.status === 'failed')
@@ -165,9 +172,13 @@ function App() {
 
       <h2>Projects</h2>
       <form onSubmit={addProject}>
+        <select value={projectSource} onChange={(e) => setProjectSource(e.target.value as 'path' | 'url')}>
+          <option value="path">local path</option>
+          <option value="url">git URL</option>
+        </select>
         <input
           type="text"
-          placeholder="/path/to/local/repo"
+          placeholder={projectSource === 'path' ? '/path/to/local/repo' : 'https://github.com/org/repo.git'}
           value={pathInput}
           onChange={(e) => setPathInput(e.target.value)}
         />
@@ -237,6 +248,14 @@ function App() {
                 <button onClick={() => retryPr(t.id)}>Retry PR</button>
               </span>
             )}
+            {t.worktreeRemoved ? (
+              <span> (worktree removed)</span>
+            ) : (
+              <>
+                <span> {t.worktreePath}</span>
+                <button onClick={() => removeWorktree(t.id)}>Remove Worktree</button>
+              </>
+            )}
           </li>
         ))}
       </ul>
@@ -249,9 +268,10 @@ function App() {
               {t.description} ({t.mode}, {t.branchName})
             </button>
             <p className="error">
-              {t.error ?? 'failed'} — worktree: {t.worktreePath}
+              {t.error ?? 'failed'} — worktree: {t.worktreeRemoved ? '(removed)' : t.worktreePath}
             </p>
             <button onClick={() => retryTask(t.id)}>Start Fresh Task</button>
+            {!t.worktreeRemoved && <button onClick={() => removeWorktree(t.id)}>Remove Worktree</button>}
           </li>
         ))}
       </ul>

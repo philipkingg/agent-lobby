@@ -2,9 +2,9 @@ import Fastify from "fastify";
 import websocketPlugin from "@fastify/websocket";
 import type { DatabaseSync } from "node:sqlite";
 import { createDb } from "./db.js";
-import { createProject, listProjects, getProject, InvalidProjectPathError } from "./projects.js";
-import { listTasks, getTask, setTaskStatus, setTaskPrResult, setTaskFailed, type Task, type TaskMode } from "./tasks.js";
-import { WorktreeError } from "./worktrees.js";
+import { createProject, listProjects, getProject, InvalidProjectPathError, type GitExecFn } from "./projects.js";
+import { listTasks, getTask, setTaskStatus, setTaskPrResult, setTaskFailed, setTaskWorktreeRemoved, type Task, type TaskMode } from "./tasks.js";
+import { WorktreeError, removeWorktree } from "./worktrees.js";
 import { listTranscriptEntries } from "./transcripts.js";
 import { AgentRunner, type QueryFn } from "./agent-runner.js";
 import { PtyManager, type SpawnFn } from "./pty-runner.js";
@@ -16,7 +16,13 @@ import type { WsEvent } from "./ws-events.js";
 
 const TERMINAL_STATUSES = ["done", "error", "stopped", "failed"];
 
-export function buildApp(db: DatabaseSync = createDb(), queryFn?: QueryFn, spawnFn?: SpawnFn, execFn?: ExecFn) {
+export function buildApp(
+  db: DatabaseSync = createDb(),
+  queryFn?: QueryFn,
+  spawnFn?: SpawnFn,
+  execFn?: ExecFn,
+  gitExecFn?: GitExecFn
+) {
   const app = Fastify();
 
   const subscribers = new Map<string, Set<{ send: (data: string) => void }>>();
@@ -116,12 +122,12 @@ export function buildApp(db: DatabaseSync = createDb(), queryFn?: QueryFn, spawn
   app.post("/projects", async (request, reply) => {
     const body = request.body as { source?: string; value?: string };
 
-    if (body.source !== "path" || !body.value) {
-      return reply.code(400).send({ error: "expected { source: 'path', value: string }" });
+    if ((body.source !== "path" && body.source !== "url") || !body.value) {
+      return reply.code(400).send({ error: "expected { source: 'path' | 'url', value: string }" });
     }
 
     try {
-      const project = createProject(db, { source: "path", value: body.value });
+      const project = createProject(db, { source: body.source, value: body.value }, gitExecFn);
       return reply.code(201).send(project);
     } catch (err) {
       if (err instanceof InvalidProjectPathError) {
@@ -253,6 +259,34 @@ export function buildApp(db: DatabaseSync = createDb(), queryFn?: QueryFn, spawn
     }
 
     return { ok: true };
+  });
+
+  app.delete("/tasks/:id/worktree", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const task = getTask(db, id);
+    if (!task) {
+      return reply.code(404).send({ error: "task not found" });
+    }
+    if (!TERMINAL_STATUSES.includes(task.status)) {
+      return reply.code(409).send({ error: "task is still running" });
+    }
+
+    const project = getProject(db, task.projectId);
+    if (!project) {
+      return reply.code(404).send({ error: "project not found" });
+    }
+
+    try {
+      removeWorktree(project, task.id);
+    } catch (err) {
+      if (err instanceof WorktreeError) {
+        return reply.code(500).send({ error: err.message });
+      }
+      throw err;
+    }
+
+    setTaskWorktreeRemoved(db, id);
+    return getTask(db, id);
   });
 
   app.get("/settings", async () => {

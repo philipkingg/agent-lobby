@@ -24,6 +24,7 @@ const task: Task = {
   prUrl: null,
   prError: null,
   error: null,
+  worktreeRemoved: 0,
   deskIndex: 0,
   pendingQuestion: null,
   createdAt: new Date().toISOString(),

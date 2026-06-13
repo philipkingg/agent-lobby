@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import os from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
@@ -14,13 +15,13 @@ export interface Project {
 
 export class InvalidProjectPathError extends Error {}
 
-function git(cwd: string, args: string[]): string {
-  return execFileSync("git", args, { cwd, encoding: "utf-8" }).trim();
-}
+export type GitExecFn = (cwd: string, args: string[]) => string;
 
-export function assertGitRepo(repoPath: string): void {
+export const defaultGitExec: GitExecFn = (cwd, args) => execFileSync("git", args, { cwd, encoding: "utf-8" }).trim();
+
+export function assertGitRepo(repoPath: string, gitExec: GitExecFn = defaultGitExec): void {
   try {
-    const inside = git(repoPath, ["rev-parse", "--is-inside-work-tree"]);
+    const inside = gitExec(repoPath, ["rev-parse", "--is-inside-work-tree"]);
     if (inside !== "true") {
       throw new InvalidProjectPathError(`${repoPath} is not a git repository`);
     }
@@ -29,12 +30,12 @@ export function assertGitRepo(repoPath: string): void {
   }
 }
 
-export function getDefaultBranch(repoPath: string): string {
+export function getDefaultBranch(repoPath: string, gitExec: GitExecFn = defaultGitExec): string {
   try {
-    const ref = git(repoPath, ["symbolic-ref", "refs/remotes/origin/HEAD"]);
+    const ref = gitExec(repoPath, ["symbolic-ref", "refs/remotes/origin/HEAD"]);
     return ref.replace("refs/remotes/origin/", "");
   } catch {
-    return git(repoPath, ["branch", "--show-current"]);
+    return gitExec(repoPath, ["branch", "--show-current"]);
   }
 }
 
@@ -42,17 +43,45 @@ export function deriveWorktreesRoot(repoPath: string, name: string): string {
   return path.join(path.dirname(repoPath), `${name}-worktrees`);
 }
 
+export function deriveCloneName(url: string): string {
+  const base = url.split("/").pop() ?? "project";
+  return base.replace(/\.git$/, "");
+}
+
+export function deriveClonePath(url: string): string {
+  return path.join(os.homedir(), ".agent-office", "projects", deriveCloneName(url));
+}
+
+export function cloneRepo(url: string, gitExec: GitExecFn = defaultGitExec): string {
+  const dest = deriveClonePath(url);
+
+  try {
+    gitExec(os.homedir(), ["clone", url, dest]);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new InvalidProjectPathError(`failed to clone ${url}: ${message}`);
+  }
+
+  return dest;
+}
+
 export interface CreateProjectInput {
-  source: "path";
+  source: "path" | "url";
   value: string;
 }
 
-export function createProject(db: DatabaseSync, input: CreateProjectInput): Project {
-  const repoPath = path.resolve(input.value);
-  assertGitRepo(repoPath);
+export function createProject(db: DatabaseSync, input: CreateProjectInput, gitExec: GitExecFn = defaultGitExec): Project {
+  let repoPath: string;
+
+  if (input.source === "url") {
+    repoPath = cloneRepo(input.value, gitExec);
+  } else {
+    repoPath = path.resolve(input.value);
+    assertGitRepo(repoPath, gitExec);
+  }
 
   const name = path.basename(repoPath);
-  const defaultBranch = getDefaultBranch(repoPath);
+  const defaultBranch = getDefaultBranch(repoPath, gitExec);
   const worktreesRoot = deriveWorktreesRoot(repoPath, name);
 
   const project: Project = {

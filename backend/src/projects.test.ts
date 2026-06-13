@@ -7,9 +7,11 @@ import {
   assertGitRepo,
   getDefaultBranch,
   deriveWorktreesRoot,
+  deriveClonePath,
   createProject,
   listProjects,
   InvalidProjectPathError,
+  type GitExecFn,
 } from "./projects.js";
 import { createDb } from "./db.js";
 
@@ -70,5 +72,35 @@ describe("createProject / listProjects", () => {
   it("rejects a non-git path", () => {
     const db = createDb();
     expect(() => createProject(db, { source: "path", value: plainDir })).toThrow(InvalidProjectPathError);
+  });
+
+  it("creates a project from a git URL by cloning it", () => {
+    const db = createDb();
+    const calls: { cwd: string; args: string[] }[] = [];
+    const gitExec: GitExecFn = (cwd, args) => {
+      calls.push({ cwd, args });
+      if (args[0] === "clone") return "";
+      if (args[0] === "branch") return "main";
+      throw new Error("no origin remote");
+    };
+
+    const project = createProject(db, { source: "url", value: "https://github.com/acme/widgets.git" }, gitExec);
+
+    expect(project.path).toBe(deriveClonePath("https://github.com/acme/widgets.git"));
+    expect(project.name).toBe("widgets");
+    expect(project.defaultBranch).toBe("main");
+    expect(calls[0].args).toEqual(["clone", "https://github.com/acme/widgets.git", project.path]);
+    expect(listProjects(db)).toEqual([project]);
+  });
+
+  it("wraps a clone failure in InvalidProjectPathError", () => {
+    const db = createDb();
+    const gitExec: GitExecFn = () => {
+      throw new Error("network error");
+    };
+
+    expect(() => createProject(db, { source: "url", value: "https://github.com/acme/widgets.git" }, gitExec)).toThrow(
+      InvalidProjectPathError
+    );
   });
 });

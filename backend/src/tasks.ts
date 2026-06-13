@@ -19,6 +19,7 @@ export interface Task {
   prUrl: string | null;
   prError: string | null;
   error: string | null;
+  worktreeRemoved: number;
   deskIndex: number | null;
   pendingQuestion: string | null;
   createdAt: string;
@@ -51,6 +52,7 @@ export function createTask(db: DatabaseSync, project: Project, input: CreateTask
     prUrl: null,
     prError: null,
     error: null,
+    worktreeRemoved: 0,
     deskIndex: allocateDeskIndex(taken),
     pendingQuestion: null,
     createdAt: now,
@@ -123,6 +125,10 @@ export function setTaskFailed(db: DatabaseSync, id: string, error: string): void
     new Date().toISOString(),
     id
   );
+}
+
+export function setTaskWorktreeRemoved(db: DatabaseSync, id: string): void {
+  db.prepare(`UPDATE tasks SET worktreeRemoved = 1, updatedAt = ? WHERE id = ?`).run(new Date().toISOString(), id);
 }
 
 export function clearTaskPendingQuestion(db: DatabaseSync, id: string, status: TaskStatus): void {

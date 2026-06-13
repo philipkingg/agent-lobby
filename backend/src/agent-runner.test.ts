@@ -32,6 +32,7 @@ function makeTask(db: ReturnType<typeof createDb>, overrides: Partial<Task> = {}
     prUrl: null,
     prError: null,
     error: null,
+    worktreeRemoved: 0,
     deskIndex: null,
     pendingQuestion: null,
     createdAt: new Date().toISOString(),

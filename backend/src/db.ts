@@ -48,6 +48,7 @@ export function createDb(path: string = ":memory:"): DatabaseSync {
       prUrl TEXT,
       prError TEXT,
       error TEXT,
+      worktreeRemoved INTEGER NOT NULL DEFAULT 0,
       deskIndex INTEGER,
       pendingQuestion TEXT,
       createdAt TEXT NOT NULL,

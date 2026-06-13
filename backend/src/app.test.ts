@@ -311,6 +311,67 @@ describe("/projects/:id/tasks", () => {
     expect(restartedTask.error).toMatch(/cannot be resumed/);
   });
 
+  it("removes a completed task's worktree via DELETE /tasks/:id/worktree", async () => {
+    const calls: { cmd: string; args: string[] }[] = [];
+    const execFn: ExecFn = (cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd === "gh") return "https://github.com/acme/repo/pull/7\n";
+      return "";
+    };
+
+    const app = buildApp(undefined, successQuery, undefined, execFn);
+
+    const projectResponse = await app.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { source: "path", value: repoDir },
+    });
+    const project = projectResponse.json();
+
+    const taskResponse = await app.inject({
+      method: "POST",
+      url: `/projects/${project.id}/tasks`,
+      payload: { description: "do the thing", mode: "sdk" },
+    });
+    const task = taskResponse.json();
+
+    let body: { status: string } = { status: "running" };
+    for (let i = 0; i < 50 && body.status !== "done"; i++) {
+      const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
+      body = getResponse.json();
+      if (body.status !== "done") await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(body.status).toBe("done");
+
+    expect(existsSync(task.worktreePath)).toBe(true);
+
+    const deleteResponse = await app.inject({ method: "DELETE", url: `/tasks/${task.id}/worktree` });
+    expect(deleteResponse.statusCode).toBe(200);
+    expect(deleteResponse.json().worktreeRemoved).toBe(1);
+    expect(existsSync(task.worktreePath)).toBe(false);
+  });
+
+  it("rejects worktree removal for a running task", async () => {
+    const app = buildApp(undefined, neverQuery);
+
+    const projectResponse = await app.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { source: "path", value: repoDir },
+    });
+    const project = projectResponse.json();
+
+    const taskResponse = await app.inject({
+      method: "POST",
+      url: `/projects/${project.id}/tasks`,
+      payload: { description: "do the thing", mode: "sdk" },
+    });
+    const task = taskResponse.json();
+
+    const deleteResponse = await app.inject({ method: "DELETE", url: `/tasks/${task.id}/worktree` });
+    expect(deleteResponse.statusCode).toBe(409);
+  });
+
   it("returns 400 for an invalid mode", async () => {
     const app = buildApp();
 

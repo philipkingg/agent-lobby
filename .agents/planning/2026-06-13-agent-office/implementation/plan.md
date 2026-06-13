@@ -11,7 +11,7 @@
 - [x] Step 8: PR Service + completion flow
 - [x] Step 9: Concurrency limit + queueing
 - [x] Step 10: Persistence & resume on restart
-- [ ] Step 11: Worktree cleanup UI + git URL project registration
+- [x] Step 11: Worktree cleanup UI + git URL project registration
 - [ ] Step 12: Art assets + polish
 
 ---
