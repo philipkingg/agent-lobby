@@ -30,8 +30,8 @@ interface Task {
 
 function App() {
   const [status, setStatus] = useState('checking...')
-  const [projects, setProjects] = useState<Project[]>([])
-  const [tasks, setTasks] = useState<Task[]>([])
+  const [projects, setProjects] = useState<Project[] | null>(null)
+  const [tasks, setTasks] = useState<Task[] | null>(null)
   const [pathInput, setPathInput] = useState('')
   const [projectSource, setProjectSource] = useState<'path' | 'url'>('path')
   const [error, setError] = useState<string | null>(null)
@@ -148,9 +148,9 @@ function App() {
     loadTasks()
   }
 
-  const activeTasks = tasks.filter((t) => t.status !== 'done' && t.status !== 'failed')
-  const completedTasks = tasks.filter((t) => t.status === 'done')
-  const failedTasks = tasks.filter((t) => t.status === 'failed')
+  const activeTasks = (tasks ?? []).filter((t) => t.status !== 'done' && t.status !== 'failed')
+  const completedTasks = (tasks ?? []).filter((t) => t.status === 'done')
+  const failedTasks = (tasks ?? []).filter((t) => t.status === 'failed')
 
   return (
     <div className="app">
@@ -186,21 +186,27 @@ function App() {
       </form>
       {error && <p className="error">{error}</p>}
 
-      <ul>
-        {projects.map((p) => (
-          <li key={p.id}>
-            <strong>{p.name}</strong> — {p.path} (default branch: {p.defaultBranch})
-          </li>
-        ))}
-      </ul>
+      {projects === null ? (
+        <p>Loading projects…</p>
+      ) : projects.length === 0 ? (
+        <p>No projects yet — add one above to get started.</p>
+      ) : (
+        <ul>
+          {projects.map((p) => (
+            <li key={p.id}>
+              <strong>{p.name}</strong> — {p.path} (default branch: {p.defaultBranch})
+            </li>
+          ))}
+        </ul>
+      )}
 
       <h2>Office</h2>
-      <OfficeCanvas tasks={tasks} onSelect={setSelectedTaskId} />
+      <OfficeCanvas tasks={tasks ?? []} onSelect={setSelectedTaskId} />
 
       <h2>Tasks</h2>
       <form onSubmit={addTask}>
         <select value={taskProjectId} onChange={(e) => setTaskProjectId(e.target.value)}>
-          {projects.map((p) => (
+          {(projects ?? []).map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
             </option>
@@ -220,17 +226,26 @@ function App() {
       </form>
       {taskError && <p className="error">{taskError}</p>}
 
-      <ul>
-        {activeTasks.map((t) => (
-          <li key={t.id}>
-            <button className="task-link" onClick={() => setSelectedTaskId(t.id)}>
-              <strong>[{t.status}]</strong> {t.description} ({t.mode}, {t.branchName})
-            </button>
-          </li>
-        ))}
-      </ul>
+      {tasks === null ? (
+        <p>Loading tasks…</p>
+      ) : activeTasks.length === 0 ? (
+        <p>No active tasks.</p>
+      ) : (
+        <ul>
+          {activeTasks.map((t) => (
+            <li key={t.id}>
+              <button className="task-link" onClick={() => setSelectedTaskId(t.id)}>
+                <strong>[{t.status}]</strong> {t.description} ({t.mode}, {t.branchName})
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <h2>Completed</h2>
+      {completedTasks.length === 0 ? (
+        <p>No completed tasks yet.</p>
+      ) : (
       <ul>
         {completedTasks.map((t) => (
           <li key={t.id}>
@@ -259,8 +274,12 @@ function App() {
           </li>
         ))}
       </ul>
+      )}
 
       <h2>Failed</h2>
+      {failedTasks.length === 0 ? (
+        <p>No failed tasks.</p>
+      ) : (
       <ul>
         {failedTasks.map((t) => (
           <li key={t.id}>
@@ -275,10 +294,11 @@ function App() {
           </li>
         ))}
       </ul>
+      )}
 
       {selectedTaskId && (
         <SidePanel
-          task={tasks.find((t) => t.id === selectedTaskId)!}
+          task={(tasks ?? []).find((t) => t.id === selectedTaskId)!}
           onClose={() => setSelectedTaskId(null)}
           onTaskUpdate={loadTasks}
         />

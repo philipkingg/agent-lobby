@@ -12,7 +12,7 @@
 - [x] Step 9: Concurrency limit + queueing
 - [x] Step 10: Persistence & resume on restart
 - [x] Step 11: Worktree cleanup UI + git URL project registration
-- [ ] Step 12: Art assets + polish
+- [x] Step 12: Art assets + polish
 
 ---
 
