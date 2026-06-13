@@ -23,6 +23,7 @@ const task: Task = {
   worktreePath: "/tmp/repo-worktrees/task-1",
   prUrl: null,
   prError: null,
+  error: null,
   deskIndex: 0,
   pendingQuestion: null,
   createdAt: new Date().toISOString(),

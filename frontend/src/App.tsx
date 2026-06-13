@@ -22,6 +22,7 @@ interface Task {
   worktreePath: string
   prUrl: string | null
   prError: string | null
+  error: string | null
   pendingQuestion: string | null
   deskIndex: number | null
 }
@@ -135,8 +136,14 @@ function App() {
     loadTasks()
   }
 
-  const activeTasks = tasks.filter((t) => t.status !== 'done')
+  const retryTask = async (taskId: string) => {
+    await fetch(`/api/tasks/${taskId}/retry`, { method: 'POST' })
+    loadTasks()
+  }
+
+  const activeTasks = tasks.filter((t) => t.status !== 'done' && t.status !== 'failed')
   const completedTasks = tasks.filter((t) => t.status === 'done')
+  const failedTasks = tasks.filter((t) => t.status === 'failed')
 
   return (
     <div className="app">
@@ -230,6 +237,21 @@ function App() {
                 <button onClick={() => retryPr(t.id)}>Retry PR</button>
               </span>
             )}
+          </li>
+        ))}
+      </ul>
+
+      <h2>Failed</h2>
+      <ul>
+        {failedTasks.map((t) => (
+          <li key={t.id}>
+            <button className="task-link" onClick={() => setSelectedTaskId(t.id)}>
+              {t.description} ({t.mode}, {t.branchName})
+            </button>
+            <p className="error">
+              {t.error ?? 'failed'} — worktree: {t.worktreePath}
+            </p>
+            <button onClick={() => retryTask(t.id)}>Start Fresh Task</button>
           </li>
         ))}
       </ul>

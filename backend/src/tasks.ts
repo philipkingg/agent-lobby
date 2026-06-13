@@ -18,6 +18,7 @@ export interface Task {
   worktreePath: string;
   prUrl: string | null;
   prError: string | null;
+  error: string | null;
   deskIndex: number | null;
   pendingQuestion: string | null;
   createdAt: string;
@@ -49,6 +50,7 @@ export function createTask(db: DatabaseSync, project: Project, input: CreateTask
     worktreePath: path,
     prUrl: null,
     prError: null,
+    error: null,
     deskIndex: allocateDeskIndex(taken),
     pendingQuestion: null,
     createdAt: now,
@@ -57,8 +59,8 @@ export function createTask(db: DatabaseSync, project: Project, input: CreateTask
 
   db.prepare(
     `INSERT INTO tasks
-      (id, projectId, description, mode, status, sessionId, branchName, worktreePath, prUrl, prError, deskIndex, pendingQuestion, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (id, projectId, description, mode, status, sessionId, branchName, worktreePath, prUrl, prError, error, deskIndex, pendingQuestion, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     task.id,
     task.projectId,
@@ -70,6 +72,7 @@ export function createTask(db: DatabaseSync, project: Project, input: CreateTask
     task.worktreePath,
     task.prUrl,
     task.prError,
+    task.error,
     task.deskIndex,
     task.pendingQuestion,
     task.createdAt,
@@ -109,6 +112,14 @@ export function setTaskPrResult(db: DatabaseSync, id: string, result: { prUrl?: 
   db.prepare(`UPDATE tasks SET prUrl = ?, prError = ?, updatedAt = ? WHERE id = ?`).run(
     result.prUrl ?? null,
     result.error ?? null,
+    new Date().toISOString(),
+    id
+  );
+}
+
+export function setTaskFailed(db: DatabaseSync, id: string, error: string): void {
+  db.prepare(`UPDATE tasks SET status = 'failed', error = ?, updatedAt = ? WHERE id = ?`).run(
+    error,
     new Date().toISOString(),
     id
   );

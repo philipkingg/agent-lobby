@@ -31,6 +31,7 @@ function makeTask(db: ReturnType<typeof createDb>, overrides: Partial<Task> = {}
     worktreePath: "/tmp/repo-worktrees/task-1",
     prUrl: null,
     prError: null,
+    error: null,
     deskIndex: null,
     pendingQuestion: null,
     createdAt: new Date().toISOString(),
@@ -40,8 +41,8 @@ function makeTask(db: ReturnType<typeof createDb>, overrides: Partial<Task> = {}
 
   db.prepare(
     `INSERT INTO tasks
-      (id, projectId, description, mode, status, sessionId, branchName, worktreePath, prUrl, prError, deskIndex, pendingQuestion, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (id, projectId, description, mode, status, sessionId, branchName, worktreePath, prUrl, prError, error, deskIndex, pendingQuestion, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     task.id,
     task.projectId,
@@ -53,6 +54,7 @@ function makeTask(db: ReturnType<typeof createDb>, overrides: Partial<Task> = {}
     task.worktreePath,
     task.prUrl,
     task.prError,
+    task.error,
     task.deskIndex,
     task.pendingQuestion,
     task.createdAt,
@@ -167,5 +169,45 @@ describe("AgentRunner.run", () => {
     const db = createDb();
     const runner = new AgentRunner(db, () => {});
     expect(runner.respond("no-such-task", "answer")).toBe(false);
+  });
+
+  it("passes resume: sessionId when the task already has a session id", async () => {
+    const db = createDb();
+    const task = makeTask(db, { sessionId: "sess-123" });
+
+    let receivedResume: string | undefined;
+    const fakeQuery: QueryFn = async function* (params) {
+      receivedResume = params.options?.resume as string | undefined;
+      yield {
+        type: "result",
+        subtype: "success",
+        uuid: "u1",
+        session_id: "sess-123",
+      } as never;
+    };
+
+    const runner = new AgentRunner(db, () => {}, fakeQuery);
+    await runner.run(task, project);
+
+    expect(receivedResume).toBe("sess-123");
+    expect(getTask(db, task.id)!.status).toBe("done");
+  });
+
+  it("marks a resumed task as failed (with error detail) if the resume throws", async () => {
+    const db = createDb();
+    const task = makeTask(db, { sessionId: "sess-123" });
+
+    const fakeQuery: QueryFn = async function* () {
+      throw new Error("resume not possible");
+    };
+
+    const events: AgentEvent[] = [];
+    const runner = new AgentRunner(db, (taskId, event) => events.push(event), fakeQuery);
+    await runner.run(task, project);
+
+    const updated = getTask(db, task.id)!;
+    expect(updated.status).toBe("failed");
+    expect(updated.error).toBe("resume not possible");
+    expect(events.filter((e) => e.type === "status")).toEqual([{ type: "status", status: "failed" }]);
   });
 });

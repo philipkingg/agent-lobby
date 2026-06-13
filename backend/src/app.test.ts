@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { buildApp } from "./app.js";
+import { createDb } from "./db.js";
 import type { QueryFn } from "./agent-runner.js";
 import type { SpawnFn, PtyProcess } from "./pty-runner.js";
 import type { ExecFn } from "./pr-service.js";
@@ -20,6 +21,18 @@ const successQuery: QueryFn = async function* () {
 
 // Never resolves, so sdk-mode tasks stay "running" without hitting the real SDK.
 const neverQuery: QueryFn = async function* () {
+  await new Promise(() => {});
+};
+
+// Reports a session id, then hangs - simulates a task still "running" at the moment of a server restart.
+const hangAfterSessionQuery: QueryFn = async function* () {
+  yield {
+    type: "assistant",
+    uuid: "u1",
+    session_id: "sess-99",
+    message: { content: [{ type: "text", text: "working" }] },
+    parent_tool_use_id: null,
+  } as never;
   await new Promise(() => {});
 };
 
@@ -223,6 +236,79 @@ describe("/projects/:id/tasks", () => {
     expect(body.status).toBe("done");
     expect(body.prUrl).toBe("https://github.com/acme/repo/pull/7");
     expect(calls.map((c) => c.cmd)).toEqual(["git", "gh"]);
+  });
+
+  it("resumes a running sdk task with its sessionId on restart", async () => {
+    const db = createDb();
+    const app = buildApp(db, hangAfterSessionQuery);
+
+    const projectResponse = await app.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { source: "path", value: repoDir },
+    });
+    const project = projectResponse.json();
+
+    const taskResponse = await app.inject({
+      method: "POST",
+      url: `/projects/${project.id}/tasks`,
+      payload: { description: "do the thing", mode: "sdk" },
+    });
+    const task = taskResponse.json();
+
+    let body: { sessionId: string | null } = { sessionId: null };
+    for (let i = 0; i < 50 && !body.sessionId; i++) {
+      const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
+      body = getResponse.json();
+      if (!body.sessionId) await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(body.sessionId).toBe("sess-99");
+
+    // "Restart" by building a new app against the same db; it should resume the running task.
+    let receivedResume: string | undefined;
+    const resumeQuery: QueryFn = async function* (params) {
+      receivedResume = params.options?.resume as string | undefined;
+      yield { type: "result", subtype: "success", uuid: "u2", session_id: "sess-99" } as never;
+    };
+
+    const restarted = buildApp(db, resumeQuery);
+
+    let status = "running";
+    for (let i = 0; i < 50 && status !== "done"; i++) {
+      const getResponse = await restarted.inject({ method: "GET", url: `/tasks/${task.id}` });
+      status = getResponse.json().status;
+      if (status !== "done") await new Promise((r) => setTimeout(r, 5));
+    }
+
+    expect(status).toBe("done");
+    expect(receivedResume).toBe("sess-99");
+  });
+
+  it("marks a running pty task as failed on restart", async () => {
+    const db = createDb();
+    const app = buildApp(db, neverQuery, fakeSpawnFn());
+
+    const projectResponse = await app.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { source: "path", value: repoDir },
+    });
+    const project = projectResponse.json();
+
+    const taskResponse = await app.inject({
+      method: "POST",
+      url: `/projects/${project.id}/tasks`,
+      payload: { description: "interactive session", mode: "pty" },
+    });
+    const task = taskResponse.json();
+    expect(task.status).toBe("running");
+
+    const restarted = buildApp(db, neverQuery, fakeSpawnFn());
+
+    const getResponse = await restarted.inject({ method: "GET", url: `/tasks/${task.id}` });
+    const restartedTask = getResponse.json();
+    expect(restartedTask.status).toBe("failed");
+    expect(restartedTask.error).toMatch(/cannot be resumed/);
   });
 
   it("returns 400 for an invalid mode", async () => {

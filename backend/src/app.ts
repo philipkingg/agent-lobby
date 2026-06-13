@@ -3,7 +3,7 @@ import websocketPlugin from "@fastify/websocket";
 import type { DatabaseSync } from "node:sqlite";
 import { createDb } from "./db.js";
 import { createProject, listProjects, getProject, InvalidProjectPathError } from "./projects.js";
-import { listTasks, getTask, setTaskStatus, setTaskPrResult, type Task, type TaskMode } from "./tasks.js";
+import { listTasks, getTask, setTaskStatus, setTaskPrResult, setTaskFailed, type Task, type TaskMode } from "./tasks.js";
 import { WorktreeError } from "./worktrees.js";
 import { listTranscriptEntries } from "./transcripts.js";
 import { AgentRunner, type QueryFn } from "./agent-runner.js";
@@ -61,6 +61,20 @@ export function buildApp(db: DatabaseSync = createDb(), queryFn?: QueryFn, spawn
   };
 
   const taskManager = new TaskManager(db, dispatchTask);
+
+  // Resume in-progress tasks left over from a previous run (e.g. server restart).
+  const incomplete = listTasks(db).filter((t) => t.status === "running" || t.status === "blocked");
+  for (const task of incomplete) {
+    const project = getProject(db, task.projectId);
+    if (!project) continue;
+
+    if (task.mode === "sdk") {
+      dispatchTask(task, project);
+    } else {
+      setTaskFailed(db, task.id, "pty session cannot be resumed after a restart");
+      broadcast(task.id, { type: "status", status: "failed" });
+    }
+  }
 
   app.register(websocketPlugin);
 
@@ -199,6 +213,32 @@ export function buildApp(db: DatabaseSync = createDb(), queryFn?: QueryFn, spawn
 
     openPullRequest(id);
     return getTask(db, id);
+  });
+
+  app.post("/tasks/:id/retry", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const task = getTask(db, id);
+    if (!task) {
+      return reply.code(404).send({ error: "task not found" });
+    }
+    if (task.status !== "failed") {
+      return reply.code(409).send({ error: "task is not failed" });
+    }
+
+    const project = getProject(db, task.projectId);
+    if (!project) {
+      return reply.code(404).send({ error: "project not found" });
+    }
+
+    try {
+      const fresh = taskManager.createTask(project, { description: task.description, mode: task.mode });
+      return reply.code(201).send(fresh);
+    } catch (err) {
+      if (err instanceof WorktreeError) {
+        return reply.code(500).send({ error: err.message });
+      }
+      throw err;
+    }
   });
 
   app.post("/tasks/:id/stop", async (request, reply) => {

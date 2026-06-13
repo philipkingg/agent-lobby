@@ -10,7 +10,7 @@ import { z } from "zod";
 import type { DatabaseSync } from "node:sqlite";
 import type { Project } from "./projects.js";
 import type { Task, TaskStatus } from "./tasks.js";
-import { setTaskStatus, setTaskSessionId, setTaskBlocked, clearTaskPendingQuestion } from "./tasks.js";
+import { setTaskStatus, setTaskSessionId, setTaskBlocked, setTaskFailed, clearTaskPendingQuestion } from "./tasks.js";
 import { addTranscriptEntry } from "./transcripts.js";
 import type { WsEvent, Broadcast } from "./ws-events.js";
 
@@ -95,33 +95,41 @@ export class AgentRunner {
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         mcpServers: { "agent-office": server },
+        ...(task.sessionId ? { resume: task.sessionId } : {}),
       },
     });
 
-    for await (const msg of stream) {
-      const entry = addTranscriptEntry(this.db, task.id, msg.type, JSON.stringify(msg));
-      this.broadcast(task.id, { type: "transcript", entry });
+    try {
+      for await (const msg of stream) {
+        const entry = addTranscriptEntry(this.db, task.id, msg.type, JSON.stringify(msg));
+        this.broadcast(task.id, { type: "transcript", entry });
 
-      if ("session_id" in msg && msg.session_id) {
-        setTaskSessionId(this.db, task.id, msg.session_id);
+        if ("session_id" in msg && msg.session_id) {
+          setTaskSessionId(this.db, task.id, msg.session_id);
+        }
+
+        const question = findAskUserQuestion(msg);
+        if (question) {
+          setTaskBlocked(this.db, task.id, question);
+          this.broadcast(task.id, { type: "status", status: "blocked", pendingQuestion: question });
+
+          await this.waitForAnswer(task.id);
+
+          clearTaskPendingQuestion(this.db, task.id, "running");
+          this.broadcast(task.id, { type: "status", status: "running", pendingQuestion: null });
+        }
+
+        if (msg.type === "result") {
+          const status: TaskStatus = msg.subtype === "success" ? "done" : "error";
+          setTaskStatus(this.db, task.id, status);
+          this.broadcast(task.id, { type: "status", status });
+        }
       }
-
-      const question = findAskUserQuestion(msg);
-      if (question) {
-        setTaskBlocked(this.db, task.id, question);
-        this.broadcast(task.id, { type: "status", status: "blocked", pendingQuestion: question });
-
-        await this.waitForAnswer(task.id);
-
-        clearTaskPendingQuestion(this.db, task.id, "running");
-        this.broadcast(task.id, { type: "status", status: "running", pendingQuestion: null });
-      }
-
-      if (msg.type === "result") {
-        const status: TaskStatus = msg.subtype === "success" ? "done" : "error";
-        setTaskStatus(this.db, task.id, status);
-        this.broadcast(task.id, { type: "status", status });
-      }
+    } catch (err) {
+      if (!task.sessionId) throw err;
+      const message = err instanceof Error ? err.message : String(err);
+      setTaskFailed(this.db, task.id, message);
+      this.broadcast(task.id, { type: "status", status: "failed" });
     }
   }
 }
