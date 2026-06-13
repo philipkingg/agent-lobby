@@ -80,3 +80,27 @@ export function getTask(db: DatabaseSync, id: string): Task | undefined {
   const row = db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(id);
   return row as Task | undefined;
 }
+
+export function setTaskStatus(db: DatabaseSync, id: string, status: TaskStatus): void {
+  db.prepare(`UPDATE tasks SET status = ?, updatedAt = ? WHERE id = ?`).run(status, new Date().toISOString(), id);
+}
+
+export function setTaskSessionId(db: DatabaseSync, id: string, sessionId: string): void {
+  db.prepare(`UPDATE tasks SET sessionId = ?, updatedAt = ? WHERE id = ?`).run(sessionId, new Date().toISOString(), id);
+}
+
+export function setTaskBlocked(db: DatabaseSync, id: string, question: string): void {
+  db.prepare(`UPDATE tasks SET status = 'blocked', pendingQuestion = ?, updatedAt = ? WHERE id = ?`).run(
+    question,
+    new Date().toISOString(),
+    id
+  );
+}
+
+export function clearTaskPendingQuestion(db: DatabaseSync, id: string, status: TaskStatus): void {
+  db.prepare(`UPDATE tasks SET status = ?, pendingQuestion = NULL, updatedAt = ? WHERE id = ?`).run(
+    status,
+    new Date().toISOString(),
+    id
+  );
+}

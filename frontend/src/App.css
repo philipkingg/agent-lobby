@@ -14,3 +14,61 @@
   padding: 0;
   text-align: left;
 }
+
+.task-link {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0.25rem 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.side-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 360px;
+  height: 100vh;
+  background: #1e1e1e;
+  color: #eee;
+  padding: 1rem;
+  box-sizing: border-box;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.side-panel-close {
+  align-self: flex-end;
+  cursor: pointer;
+}
+
+.transcript-log {
+  flex: 1;
+  overflow-y: auto;
+  font-family: monospace;
+  font-size: 0.8rem;
+  margin-top: 0.5rem;
+}
+
+.transcript-entry {
+  margin-bottom: 0.4rem;
+  word-break: break-word;
+}
+
+.transcript-type {
+  color: #888;
+  margin-right: 0.4rem;
+}
+
+.pending-question {
+  font-weight: bold;
+}
+
+.respond-form {
+  margin-top: 0.5rem;
+}

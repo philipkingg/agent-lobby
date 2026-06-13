@@ -4,6 +4,12 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { buildApp } from "./app.js";
+import type { QueryFn } from "./agent-runner.js";
+
+// Never resolves, so sdk-mode tasks stay "running" without hitting the real SDK.
+const neverQuery: QueryFn = async function* () {
+  await new Promise(() => {});
+};
 
 const GIT_ENV = {
   ...process.env,
@@ -89,7 +95,7 @@ describe("/projects/:id/tasks", () => {
   });
 
   it("creates a task with an isolated worktree, and lists/fetches it", async () => {
-    const app = buildApp();
+    const app = buildApp(undefined, neverQuery);
 
     const projectResponse = await app.inject({
       method: "POST",

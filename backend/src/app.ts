@@ -1,12 +1,45 @@
 import Fastify from "fastify";
+import websocketPlugin from "@fastify/websocket";
 import type { DatabaseSync } from "node:sqlite";
 import { createDb } from "./db.js";
 import { createProject, listProjects, getProject, InvalidProjectPathError } from "./projects.js";
-import { createTask, listTasks, getTask, type TaskMode } from "./tasks.js";
+import { createTask, listTasks, getTask, setTaskStatus, type TaskMode } from "./tasks.js";
 import { WorktreeError } from "./worktrees.js";
+import { listTranscriptEntries } from "./transcripts.js";
+import { AgentRunner, type AgentEvent, type QueryFn } from "./agent-runner.js";
 
-export function buildApp(db: DatabaseSync = createDb()) {
+export function buildApp(db: DatabaseSync = createDb(), queryFn?: QueryFn) {
   const app = Fastify();
+
+  const subscribers = new Map<string, Set<{ send: (data: string) => void }>>();
+  const broadcast = (taskId: string, event: AgentEvent) => {
+    const sockets = subscribers.get(taskId);
+    if (!sockets) return;
+    const payload = JSON.stringify(event);
+    for (const socket of sockets) {
+      socket.send(payload);
+    }
+  };
+
+  const runner = new AgentRunner(db, broadcast, queryFn);
+
+  app.register(websocketPlugin);
+
+  app.register(async (instance) => {
+    instance.get("/ws/tasks/:id", { websocket: true }, (socket, request) => {
+      const { id } = request.params as { id: string };
+      let sockets = subscribers.get(id);
+      if (!sockets) {
+        sockets = new Set();
+        subscribers.set(id, sockets);
+      }
+      sockets.add(socket);
+
+      socket.on("close", () => {
+        sockets?.delete(socket);
+      });
+    });
+  });
 
   app.get("/health", async () => {
     return { status: "ok" };
@@ -49,6 +82,14 @@ export function buildApp(db: DatabaseSync = createDb()) {
 
     try {
       const task = createTask(db, project, { description: body.description, mode: body.mode as TaskMode });
+
+      if (task.mode === "sdk") {
+        runner.run(task, project).catch(() => {
+          setTaskStatus(db, task.id, "error");
+          broadcast(task.id, { type: "status", status: "error" });
+        });
+      }
+
       return reply.code(201).send(task);
     } catch (err) {
       if (err instanceof WorktreeError) {
@@ -69,6 +110,35 @@ export function buildApp(db: DatabaseSync = createDb()) {
       return reply.code(404).send({ error: "task not found" });
     }
     return task;
+  });
+
+  app.get("/tasks/:id/transcript", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const task = getTask(db, id);
+    if (!task) {
+      return reply.code(404).send({ error: "task not found" });
+    }
+    return listTranscriptEntries(db, id);
+  });
+
+  app.post("/tasks/:id/respond", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as { message?: string };
+
+    if (!body.message) {
+      return reply.code(400).send({ error: "expected { message: string }" });
+    }
+
+    const task = getTask(db, id);
+    if (!task) {
+      return reply.code(404).send({ error: "task not found" });
+    }
+
+    if (!runner.respond(id, body.message)) {
+      return reply.code(409).send({ error: "task is not waiting for a response" });
+    }
+
+    return { ok: true };
   });
 
   return app;

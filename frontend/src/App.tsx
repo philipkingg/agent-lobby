@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import './App.css'
+import SidePanel from './SidePanel'
 
 interface Project {
   id: string
@@ -19,6 +20,7 @@ interface Task {
   branchName: string
   worktreePath: string
   prUrl: string | null
+  pendingQuestion: string | null
 }
 
 function App() {
@@ -32,6 +34,7 @@ function App() {
   const [taskDescription, setTaskDescription] = useState('')
   const [taskMode, setTaskMode] = useState<'sdk' | 'pty'>('sdk')
   const [taskError, setTaskError] = useState<string | null>(null)
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
 
   const loadProjects = () => {
     fetch('/api/projects')
@@ -156,10 +159,20 @@ function App() {
       <ul>
         {tasks.map((t) => (
           <li key={t.id}>
-            <strong>[{t.status}]</strong> {t.description} ({t.mode}, {t.branchName})
+            <button className="task-link" onClick={() => setSelectedTaskId(t.id)}>
+              <strong>[{t.status}]</strong> {t.description} ({t.mode}, {t.branchName})
+            </button>
           </li>
         ))}
       </ul>
+
+      {selectedTaskId && (
+        <SidePanel
+          task={tasks.find((t) => t.id === selectedTaskId)!}
+          onClose={() => setSelectedTaskId(null)}
+          onTaskUpdate={loadTasks}
+        />
+      )}
     </div>
   )
 }
