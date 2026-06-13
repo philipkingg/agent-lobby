@@ -76,3 +76,8 @@ export function listProjects(db: DatabaseSync): Project[] {
   const rows = db.prepare(`SELECT * FROM projects ORDER BY createdAt ASC`).all();
   return rows as unknown as Project[];
 }
+
+export function getProject(db: DatabaseSync, id: string): Project | undefined {
+  const row = db.prepare(`SELECT * FROM projects WHERE id = ?`).get(id);
+  return row as Project | undefined;
+}

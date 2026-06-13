@@ -18,5 +18,23 @@ export function createDb(path: string = ":memory:"): DatabaseSync {
     )
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tasks (
+      id TEXT PRIMARY KEY,
+      projectId TEXT NOT NULL REFERENCES projects(id),
+      description TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      status TEXT NOT NULL,
+      sessionId TEXT,
+      branchName TEXT NOT NULL,
+      worktreePath TEXT NOT NULL,
+      prUrl TEXT,
+      deskIndex INTEGER,
+      pendingQuestion TEXT,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    )
+  `);
+
   return db;
 }
