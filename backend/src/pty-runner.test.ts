@@ -20,6 +20,7 @@ function makeTask(db: ReturnType<typeof createDb>, worktreePath: string): Task {
     branchName: "agent/task-1",
     worktreePath,
     prUrl: null,
+    prError: null,
     deskIndex: null,
     pendingQuestion: null,
     createdAt: new Date().toISOString(),
@@ -28,8 +29,8 @@ function makeTask(db: ReturnType<typeof createDb>, worktreePath: string): Task {
 
   db.prepare(
     `INSERT INTO tasks
-      (id, projectId, description, mode, status, sessionId, branchName, worktreePath, prUrl, deskIndex, pendingQuestion, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (id, projectId, description, mode, status, sessionId, branchName, worktreePath, prUrl, prError, deskIndex, pendingQuestion, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     task.id,
     task.projectId,
@@ -40,6 +41,7 @@ function makeTask(db: ReturnType<typeof createDb>, worktreePath: string): Task {
     task.branchName,
     task.worktreePath,
     task.prUrl,
+    task.prError,
     task.deskIndex,
     task.pendingQuestion,
     task.createdAt,

@@ -3,24 +3,38 @@ import websocketPlugin from "@fastify/websocket";
 import type { DatabaseSync } from "node:sqlite";
 import { createDb } from "./db.js";
 import { createProject, listProjects, getProject, InvalidProjectPathError } from "./projects.js";
-import { createTask, listTasks, getTask, setTaskStatus, type TaskMode } from "./tasks.js";
+import { createTask, listTasks, getTask, setTaskStatus, setTaskPrResult, type TaskMode } from "./tasks.js";
 import { WorktreeError } from "./worktrees.js";
 import { listTranscriptEntries } from "./transcripts.js";
 import { AgentRunner, type QueryFn } from "./agent-runner.js";
 import { PtyManager, type SpawnFn } from "./pty-runner.js";
+import { createPullRequest, type ExecFn } from "./pr-service.js";
 import type { WsEvent } from "./ws-events.js";
 
-export function buildApp(db: DatabaseSync = createDb(), queryFn?: QueryFn, spawnFn?: SpawnFn) {
+export function buildApp(db: DatabaseSync = createDb(), queryFn?: QueryFn, spawnFn?: SpawnFn, execFn?: ExecFn) {
   const app = Fastify();
 
   const subscribers = new Map<string, Set<{ send: (data: string) => void }>>();
   const broadcast = (taskId: string, event: WsEvent) => {
     const sockets = subscribers.get(taskId);
-    if (!sockets) return;
-    const payload = JSON.stringify(event);
-    for (const socket of sockets) {
-      socket.send(payload);
+    if (sockets) {
+      const payload = JSON.stringify(event);
+      for (const socket of sockets) {
+        socket.send(payload);
+      }
     }
+
+    if (event.type === "status" && event.status === "done") {
+      openPullRequest(taskId);
+    }
+  };
+
+  const openPullRequest = (taskId: string) => {
+    const task = getTask(db, taskId);
+    const project = task && getProject(db, task.projectId);
+    if (!task || !project) return;
+    const result = createPullRequest(task, project, execFn);
+    setTaskPrResult(db, taskId, result);
   };
 
   const runner = new AgentRunner(db, broadcast, queryFn);
@@ -159,6 +173,20 @@ export function buildApp(db: DatabaseSync = createDb(), queryFn?: QueryFn, spawn
     }
 
     return { ok: true };
+  });
+
+  app.post("/tasks/:id/retry-pr", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const task = getTask(db, id);
+    if (!task) {
+      return reply.code(404).send({ error: "task not found" });
+    }
+    if (task.status !== "done") {
+      return reply.code(409).send({ error: "task is not done" });
+    }
+
+    openPullRequest(id);
+    return getTask(db, id);
   });
 
   app.post("/tasks/:id/stop", async (request, reply) => {

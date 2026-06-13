@@ -21,6 +21,7 @@ interface Task {
   branchName: string
   worktreePath: string
   prUrl: string | null
+  prError: string | null
   pendingQuestion: string | null
   deskIndex: number | null
 }
@@ -113,6 +114,14 @@ function App() {
     loadTasks()
   }
 
+  const retryPr = async (taskId: string) => {
+    await fetch(`/api/tasks/${taskId}/retry-pr`, { method: 'POST' })
+    loadTasks()
+  }
+
+  const activeTasks = tasks.filter((t) => t.status !== 'done')
+  const completedTasks = tasks.filter((t) => t.status === 'done')
+
   return (
     <div className="app">
       <h1>Agent Office</h1>
@@ -165,11 +174,33 @@ function App() {
       {taskError && <p className="error">{taskError}</p>}
 
       <ul>
-        {tasks.map((t) => (
+        {activeTasks.map((t) => (
           <li key={t.id}>
             <button className="task-link" onClick={() => setSelectedTaskId(t.id)}>
               <strong>[{t.status}]</strong> {t.description} ({t.mode}, {t.branchName})
             </button>
+          </li>
+        ))}
+      </ul>
+
+      <h2>Completed</h2>
+      <ul>
+        {completedTasks.map((t) => (
+          <li key={t.id}>
+            <button className="task-link" onClick={() => setSelectedTaskId(t.id)}>
+              {t.description} ({t.mode}, {t.branchName})
+            </button>
+            {t.prUrl && (
+              <a href={t.prUrl} target="_blank" rel="noreferrer">
+                {t.prUrl}
+              </a>
+            )}
+            {t.prError && (
+              <span className="error">
+                {t.prError}{' '}
+                <button onClick={() => retryPr(t.id)}>Retry PR</button>
+              </span>
+            )}
           </li>
         ))}
       </ul>

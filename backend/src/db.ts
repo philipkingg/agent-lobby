@@ -39,6 +39,7 @@ export function createDb(path: string = ":memory:"): DatabaseSync {
       branchName TEXT NOT NULL,
       worktreePath TEXT NOT NULL,
       prUrl TEXT,
+      prError TEXT,
       deskIndex INTEGER,
       pendingQuestion TEXT,
       createdAt TEXT NOT NULL,

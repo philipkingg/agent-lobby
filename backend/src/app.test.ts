@@ -6,6 +6,17 @@ import path from "node:path";
 import { buildApp } from "./app.js";
 import type { QueryFn } from "./agent-runner.js";
 import type { SpawnFn, PtyProcess } from "./pty-runner.js";
+import type { ExecFn } from "./pr-service.js";
+
+// Resolves immediately with a successful result, triggering the "done" -> PR flow.
+const successQuery: QueryFn = async function* () {
+  yield {
+    type: "result",
+    subtype: "success",
+    uuid: "u1",
+    session_id: "sess-1",
+  } as never;
+};
 
 // Never resolves, so sdk-mode tasks stay "running" without hitting the real SDK.
 const neverQuery: QueryFn = async function* () {
@@ -176,6 +187,42 @@ describe("/projects/:id/tasks", () => {
 
     const secondStop = await app.inject({ method: "POST", url: `/tasks/${task.id}/stop` });
     expect(secondStop.statusCode).toBe(409);
+  });
+
+  it("opens a PR when a task completes successfully", async () => {
+    const calls: { cmd: string; args: string[] }[] = [];
+    const execFn: ExecFn = (cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd === "gh") return "https://github.com/acme/repo/pull/7\n";
+      return "";
+    };
+
+    const app = buildApp(undefined, successQuery, undefined, execFn);
+
+    const projectResponse = await app.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { source: "path", value: repoDir },
+    });
+    const project = projectResponse.json();
+
+    const taskResponse = await app.inject({
+      method: "POST",
+      url: `/projects/${project.id}/tasks`,
+      payload: { description: "do the thing", mode: "sdk" },
+    });
+    const task = taskResponse.json();
+
+    let body: { status: string; prUrl: string | null } = { status: "running", prUrl: null };
+    for (let i = 0; i < 50 && body.status !== "done"; i++) {
+      const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
+      body = getResponse.json();
+      if (body.status !== "done") await new Promise((r) => setTimeout(r, 5));
+    }
+
+    expect(body.status).toBe("done");
+    expect(body.prUrl).toBe("https://github.com/acme/repo/pull/7");
+    expect(calls.map((c) => c.cmd)).toEqual(["git", "gh"]);
   });
 
   it("returns 400 for an invalid mode", async () => {

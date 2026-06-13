@@ -17,6 +17,7 @@ export interface Task {
   branchName: string;
   worktreePath: string;
   prUrl: string | null;
+  prError: string | null;
   deskIndex: number | null;
   pendingQuestion: string | null;
   createdAt: string;
@@ -47,6 +48,7 @@ export function createTask(db: DatabaseSync, project: Project, input: CreateTask
     branchName: branchName(id),
     worktreePath: path,
     prUrl: null,
+    prError: null,
     deskIndex: allocateDeskIndex(taken),
     pendingQuestion: null,
     createdAt: now,
@@ -55,8 +57,8 @@ export function createTask(db: DatabaseSync, project: Project, input: CreateTask
 
   db.prepare(
     `INSERT INTO tasks
-      (id, projectId, description, mode, status, sessionId, branchName, worktreePath, prUrl, deskIndex, pendingQuestion, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (id, projectId, description, mode, status, sessionId, branchName, worktreePath, prUrl, prError, deskIndex, pendingQuestion, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     task.id,
     task.projectId,
@@ -67,6 +69,7 @@ export function createTask(db: DatabaseSync, project: Project, input: CreateTask
     task.branchName,
     task.worktreePath,
     task.prUrl,
+    task.prError,
     task.deskIndex,
     task.pendingQuestion,
     task.createdAt,
@@ -97,6 +100,15 @@ export function setTaskSessionId(db: DatabaseSync, id: string, sessionId: string
 export function setTaskBlocked(db: DatabaseSync, id: string, question: string): void {
   db.prepare(`UPDATE tasks SET status = 'blocked', pendingQuestion = ?, updatedAt = ? WHERE id = ?`).run(
     question,
+    new Date().toISOString(),
+    id
+  );
+}
+
+export function setTaskPrResult(db: DatabaseSync, id: string, result: { prUrl?: string; error?: string }): void {
+  db.prepare(`UPDATE tasks SET prUrl = ?, prError = ?, updatedAt = ? WHERE id = ?`).run(
+    result.prUrl ?? null,
+    result.error ?? null,
     new Date().toISOString(),
     id
   );

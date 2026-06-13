@@ -30,6 +30,7 @@ function makeTask(db: ReturnType<typeof createDb>, overrides: Partial<Task> = {}
     branchName: "agent/task-1",
     worktreePath: "/tmp/repo-worktrees/task-1",
     prUrl: null,
+    prError: null,
     deskIndex: null,
     pendingQuestion: null,
     createdAt: new Date().toISOString(),
@@ -39,8 +40,8 @@ function makeTask(db: ReturnType<typeof createDb>, overrides: Partial<Task> = {}
 
   db.prepare(
     `INSERT INTO tasks
-      (id, projectId, description, mode, status, sessionId, branchName, worktreePath, prUrl, deskIndex, pendingQuestion, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (id, projectId, description, mode, status, sessionId, branchName, worktreePath, prUrl, prError, deskIndex, pendingQuestion, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     task.id,
     task.projectId,
@@ -51,6 +52,7 @@ function makeTask(db: ReturnType<typeof createDb>, overrides: Partial<Task> = {}
     task.branchName,
     task.worktreePath,
     task.prUrl,
+    task.prError,
     task.deskIndex,
     task.pendingQuestion,
     task.createdAt,
