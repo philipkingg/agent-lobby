@@ -5,11 +5,26 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { buildApp } from "./app.js";
 import type { QueryFn } from "./agent-runner.js";
+import type { SpawnFn, PtyProcess } from "./pty-runner.js";
 
 // Never resolves, so sdk-mode tasks stay "running" without hitting the real SDK.
 const neverQuery: QueryFn = async function* () {
   await new Promise(() => {});
 };
+
+// A fake pty process that never exits on its own, so tests can drive it via stop().
+function fakeSpawnFn(): SpawnFn {
+  return () => {
+    const proc: PtyProcess = {
+      onData: () => {},
+      onExit: () => {},
+      write: () => {},
+      resize: () => {},
+      kill: () => {},
+    };
+    return proc;
+  };
+}
 
 const GIT_ENV = {
   ...process.env,
@@ -133,6 +148,34 @@ describe("/projects/:id/tasks", () => {
     });
 
     expect(response.statusCode).toBe(404);
+  });
+
+  it("creates a pty task and stops it via /tasks/:id/stop", async () => {
+    const app = buildApp(undefined, neverQuery, fakeSpawnFn());
+
+    const projectResponse = await app.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { source: "path", value: repoDir },
+    });
+    const project = projectResponse.json();
+
+    const taskResponse = await app.inject({
+      method: "POST",
+      url: `/projects/${project.id}/tasks`,
+      payload: { description: "interactive session", mode: "pty" },
+    });
+    expect(taskResponse.statusCode).toBe(201);
+    const task = taskResponse.json();
+
+    const stopResponse = await app.inject({ method: "POST", url: `/tasks/${task.id}/stop` });
+    expect(stopResponse.statusCode).toBe(200);
+
+    const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
+    expect(getResponse.json().status).toBe("stopped");
+
+    const secondStop = await app.inject({ method: "POST", url: `/tasks/${task.id}/stop` });
+    expect(secondStop.statusCode).toBe(409);
   });
 
   it("returns 400 for an invalid mode", async () => {

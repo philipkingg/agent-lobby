@@ -72,3 +72,14 @@
 .respond-form {
   margin-top: 0.5rem;
 }
+
+.pty-terminal {
+  flex: 1;
+  overflow: hidden;
+  margin-top: 0.5rem;
+}
+
+.stop-button {
+  margin-top: 0.5rem;
+  align-self: flex-start;
+}

@@ -6,13 +6,15 @@ import { createProject, listProjects, getProject, InvalidProjectPathError } from
 import { createTask, listTasks, getTask, setTaskStatus, type TaskMode } from "./tasks.js";
 import { WorktreeError } from "./worktrees.js";
 import { listTranscriptEntries } from "./transcripts.js";
-import { AgentRunner, type AgentEvent, type QueryFn } from "./agent-runner.js";
+import { AgentRunner, type QueryFn } from "./agent-runner.js";
+import { PtyManager, type SpawnFn } from "./pty-runner.js";
+import type { WsEvent } from "./ws-events.js";
 
-export function buildApp(db: DatabaseSync = createDb(), queryFn?: QueryFn) {
+export function buildApp(db: DatabaseSync = createDb(), queryFn?: QueryFn, spawnFn?: SpawnFn) {
   const app = Fastify();
 
   const subscribers = new Map<string, Set<{ send: (data: string) => void }>>();
-  const broadcast = (taskId: string, event: AgentEvent) => {
+  const broadcast = (taskId: string, event: WsEvent) => {
     const sockets = subscribers.get(taskId);
     if (!sockets) return;
     const payload = JSON.stringify(event);
@@ -22,6 +24,7 @@ export function buildApp(db: DatabaseSync = createDb(), queryFn?: QueryFn) {
   };
 
   const runner = new AgentRunner(db, broadcast, queryFn);
+  const ptyManager = new PtyManager(db, broadcast, spawnFn);
 
   app.register(websocketPlugin);
 
@@ -34,6 +37,21 @@ export function buildApp(db: DatabaseSync = createDb(), queryFn?: QueryFn) {
         subscribers.set(id, sockets);
       }
       sockets.add(socket);
+
+      socket.on("message", (raw: Buffer) => {
+        let msg: { type?: string; data?: string; cols?: number; rows?: number };
+        try {
+          msg = JSON.parse(raw.toString());
+        } catch {
+          return;
+        }
+
+        if (msg.type === "input" && typeof msg.data === "string") {
+          ptyManager.write(id, msg.data);
+        } else if (msg.type === "resize" && typeof msg.cols === "number" && typeof msg.rows === "number") {
+          ptyManager.resize(id, msg.cols, msg.rows);
+        }
+      });
 
       socket.on("close", () => {
         sockets?.delete(socket);
@@ -88,6 +106,8 @@ export function buildApp(db: DatabaseSync = createDb(), queryFn?: QueryFn) {
           setTaskStatus(db, task.id, "error");
           broadcast(task.id, { type: "status", status: "error" });
         });
+      } else {
+        ptyManager.start(task);
       }
 
       return reply.code(201).send(task);
@@ -136,6 +156,20 @@ export function buildApp(db: DatabaseSync = createDb(), queryFn?: QueryFn) {
 
     if (!runner.respond(id, body.message)) {
       return reply.code(409).send({ error: "task is not waiting for a response" });
+    }
+
+    return { ok: true };
+  });
+
+  app.post("/tasks/:id/stop", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const task = getTask(db, id);
+    if (!task) {
+      return reply.code(404).send({ error: "task not found" });
+    }
+
+    if (!ptyManager.stop(id)) {
+      return reply.code(409).send({ error: "task has no running pty session" });
     }
 
     return { ok: true };

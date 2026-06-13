@@ -1,12 +1,12 @@
 # Implementation Plan — Agent Office
 
 ## Checklist
-- [ ] Step 1: Project scaffold (backend + frontend, health check)
-- [ ] Step 2: Project Registry (SQLite + add/list local projects)
-- [ ] Step 3: Worktree Manager + Task creation
-- [ ] Step 4: SDK Agent Runner + transcript + live updates
-- [ ] Step 5: AskUser / blocked-question flow
-- [ ] Step 6: PTY Manager + attach/detach terminal
+- [x] Step 1: Project scaffold (backend + frontend, health check)
+- [x] Step 2: Project Registry (SQLite + add/list local projects)
+- [x] Step 3: Worktree Manager + Task creation
+- [x] Step 4: SDK Agent Runner + transcript + live updates
+- [x] Step 5: AskUser / blocked-question flow
+- [x] Step 6: PTY Manager + attach/detach terminal
 - [ ] Step 7: Office Canvas (PixiJS sprites + states)
 - [ ] Step 8: PR Service + completion flow
 - [ ] Step 9: Concurrency limit + queueing

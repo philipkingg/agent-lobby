@@ -11,13 +11,11 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Project } from "./projects.js";
 import type { Task, TaskStatus } from "./tasks.js";
 import { setTaskStatus, setTaskSessionId, setTaskBlocked, clearTaskPendingQuestion } from "./tasks.js";
-import { addTranscriptEntry, type TranscriptEntry } from "./transcripts.js";
+import { addTranscriptEntry } from "./transcripts.js";
+import type { WsEvent, Broadcast } from "./ws-events.js";
 
-export type AgentEvent =
-  | { type: "transcript"; entry: TranscriptEntry }
-  | { type: "status"; status: TaskStatus; pendingQuestion?: string | null };
-
-export type Broadcast = (taskId: string, event: AgentEvent) => void;
+export type AgentEvent = WsEvent;
+export type { Broadcast };
 
 export type QueryFn = (params: {
   prompt: string | AsyncIterable<SDKUserMessage>;

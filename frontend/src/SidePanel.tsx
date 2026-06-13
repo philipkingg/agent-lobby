@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import PtyTerminal from './PtyTerminal'
 
 interface TranscriptEntry {
   id: string
@@ -13,6 +14,7 @@ interface Task {
   status: string
   pendingQuestion: string | null
   description: string
+  mode: 'sdk' | 'pty'
 }
 
 type AgentEvent =
@@ -56,6 +58,8 @@ function SidePanel({ task, onClose, onTaskUpdate }: SidePanelProps) {
     setStatus(task.status)
     setPendingQuestion(task.pendingQuestion)
 
+    if (task.mode !== 'sdk') return
+
     fetch(`/api/tasks/${task.id}/transcript`)
       .then((res) => res.json())
       .then(setEntries)
@@ -84,6 +88,11 @@ function SidePanel({ task, onClose, onTaskUpdate }: SidePanelProps) {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight })
   }, [entries])
 
+  const stopTask = async () => {
+    await fetch(`/api/tasks/${task.id}/stop`, { method: 'POST' })
+    onTaskUpdate()
+  }
+
   const sendReply = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!reply.trim()) return
@@ -107,13 +116,24 @@ function SidePanel({ task, onClose, onTaskUpdate }: SidePanelProps) {
         status: <strong>{status}</strong>
       </p>
 
-      <div className="transcript-log" ref={logRef}>
-        {entries.map((entry) => (
-          <div key={entry.id} className={`transcript-entry transcript-${entry.type}`}>
-            <span className="transcript-type">{entry.type}</span> {summarize(entry)}
-          </div>
-        ))}
-      </div>
+      {task.mode === 'sdk' ? (
+        <div className="transcript-log" ref={logRef}>
+          {entries.map((entry) => (
+            <div key={entry.id} className={`transcript-entry transcript-${entry.type}`}>
+              <span className="transcript-type">{entry.type}</span> {summarize(entry)}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <>
+          <PtyTerminal taskId={task.id} onStatus={setStatus} />
+          {(status === 'running' || status === 'blocked') && (
+            <button className="stop-button" onClick={stopTask}>
+              Stop
+            </button>
+          )}
+        </>
+      )}
 
       {status === 'blocked' && (
         <form onSubmit={sendReply} className="respond-form">
