@@ -38,6 +38,7 @@ function App() {
   const [taskMode, setTaskMode] = useState<'sdk' | 'pty'>('sdk')
   const [taskError, setTaskError] = useState<string | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const [maxConcurrentAgents, setMaxConcurrentAgents] = useState<number | null>(null)
 
   const loadProjects = () => {
     fetch('/api/projects')
@@ -65,9 +66,24 @@ function App() {
     loadProjects()
     loadTasks()
 
+    fetch('/api/settings')
+      .then((res) => res.json())
+      .then((data: { maxConcurrentAgents: number }) => setMaxConcurrentAgents(data.maxConcurrentAgents))
+      .catch(() => {})
+
     const interval = setInterval(loadTasks, 3000)
     return () => clearInterval(interval)
   }, [])
+
+  const updateMaxConcurrentAgents = async (value: number) => {
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ maxConcurrentAgents: value }),
+    })
+    const data: { maxConcurrentAgents: number } = await res.json()
+    setMaxConcurrentAgents(data.maxConcurrentAgents)
+  }
 
   const addProject = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -126,6 +142,19 @@ function App() {
     <div className="app">
       <h1>Agent Office</h1>
       <p>Backend status: {status}</p>
+
+      {maxConcurrentAgents !== null && (
+        <p>
+          Max concurrent agents:{' '}
+          <input
+            type="number"
+            min={1}
+            max={10}
+            value={maxConcurrentAgents}
+            onChange={(e) => updateMaxConcurrentAgents(Number(e.target.value))}
+          />
+        </p>
+      )}
 
       <h2>Projects</h2>
       <form onSubmit={addProject}>

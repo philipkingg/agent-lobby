@@ -3,13 +3,18 @@ import websocketPlugin from "@fastify/websocket";
 import type { DatabaseSync } from "node:sqlite";
 import { createDb } from "./db.js";
 import { createProject, listProjects, getProject, InvalidProjectPathError } from "./projects.js";
-import { createTask, listTasks, getTask, setTaskStatus, setTaskPrResult, type TaskMode } from "./tasks.js";
+import { listTasks, getTask, setTaskStatus, setTaskPrResult, type Task, type TaskMode } from "./tasks.js";
 import { WorktreeError } from "./worktrees.js";
 import { listTranscriptEntries } from "./transcripts.js";
 import { AgentRunner, type QueryFn } from "./agent-runner.js";
 import { PtyManager, type SpawnFn } from "./pty-runner.js";
 import { createPullRequest, type ExecFn } from "./pr-service.js";
+import { TaskManager } from "./task-manager.js";
+import { getMaxConcurrentAgents, setMaxConcurrentAgents } from "./settings.js";
+import type { Project } from "./projects.js";
 import type { WsEvent } from "./ws-events.js";
+
+const TERMINAL_STATUSES = ["done", "error", "stopped", "failed"];
 
 export function buildApp(db: DatabaseSync = createDb(), queryFn?: QueryFn, spawnFn?: SpawnFn, execFn?: ExecFn) {
   const app = Fastify();
@@ -27,6 +32,10 @@ export function buildApp(db: DatabaseSync = createDb(), queryFn?: QueryFn, spawn
     if (event.type === "status" && event.status === "done") {
       openPullRequest(taskId);
     }
+
+    if (event.type === "status" && TERMINAL_STATUSES.includes(event.status)) {
+      taskManager.onTaskFinished();
+    }
   };
 
   const openPullRequest = (taskId: string) => {
@@ -39,6 +48,19 @@ export function buildApp(db: DatabaseSync = createDb(), queryFn?: QueryFn, spawn
 
   const runner = new AgentRunner(db, broadcast, queryFn);
   const ptyManager = new PtyManager(db, broadcast, spawnFn);
+
+  const dispatchTask = (task: Task, project: Project) => {
+    if (task.mode === "sdk") {
+      runner.run(task, project).catch(() => {
+        setTaskStatus(db, task.id, "error");
+        broadcast(task.id, { type: "status", status: "error" });
+      });
+    } else {
+      ptyManager.start(task);
+    }
+  };
+
+  const taskManager = new TaskManager(db, dispatchTask);
 
   app.register(websocketPlugin);
 
@@ -113,17 +135,7 @@ export function buildApp(db: DatabaseSync = createDb(), queryFn?: QueryFn, spawn
     }
 
     try {
-      const task = createTask(db, project, { description: body.description, mode: body.mode as TaskMode });
-
-      if (task.mode === "sdk") {
-        runner.run(task, project).catch(() => {
-          setTaskStatus(db, task.id, "error");
-          broadcast(task.id, { type: "status", status: "error" });
-        });
-      } else {
-        ptyManager.start(task);
-      }
-
+      const task = taskManager.createTask(project, { description: body.description, mode: body.mode as TaskMode });
       return reply.code(201).send(task);
     } catch (err) {
       if (err instanceof WorktreeError) {
@@ -201,6 +213,19 @@ export function buildApp(db: DatabaseSync = createDb(), queryFn?: QueryFn, spawn
     }
 
     return { ok: true };
+  });
+
+  app.get("/settings", async () => {
+    return { maxConcurrentAgents: getMaxConcurrentAgents(db) };
+  });
+
+  app.post("/settings", async (request, reply) => {
+    const body = request.body as { maxConcurrentAgents?: number };
+    if (typeof body.maxConcurrentAgents !== "number" || !Number.isFinite(body.maxConcurrentAgents)) {
+      return reply.code(400).send({ error: "expected { maxConcurrentAgents: number }" });
+    }
+    const maxConcurrentAgents = setMaxConcurrentAgents(db, body.maxConcurrentAgents);
+    return { maxConcurrentAgents };
   });
 
   return app;

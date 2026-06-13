@@ -9,7 +9,7 @@
 - [x] Step 6: PTY Manager + attach/detach terminal
 - [x] Step 7: Office Canvas (PixiJS sprites + states)
 - [x] Step 8: PR Service + completion flow
-- [ ] Step 9: Concurrency limit + queueing
+- [x] Step 9: Concurrency limit + queueing
 - [ ] Step 10: Persistence & resume on restart
 - [ ] Step 11: Worktree cleanup UI + git URL project registration
 - [ ] Step 12: Art assets + polish
