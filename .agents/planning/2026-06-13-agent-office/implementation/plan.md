@@ -7,7 +7,7 @@
 - [x] Step 4: SDK Agent Runner + transcript + live updates
 - [x] Step 5: AskUser / blocked-question flow
 - [x] Step 6: PTY Manager + attach/detach terminal
-- [ ] Step 7: Office Canvas (PixiJS sprites + states)
+- [x] Step 7: Office Canvas (PixiJS sprites + states)
 - [ ] Step 8: PR Service + completion flow
 - [ ] Step 9: Concurrency limit + queueing
 - [ ] Step 10: Persistence & resume on restart

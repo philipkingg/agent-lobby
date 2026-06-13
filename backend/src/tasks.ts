@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type { Project } from "./projects.js";
 import { branchName, createWorktree } from "./worktrees.js";
+import { allocateDeskIndex } from "./desks.js";
 
 export type TaskMode = "sdk" | "pty";
 export type TaskStatus = "queued" | "running" | "blocked" | "done" | "error" | "stopped" | "failed";
@@ -32,6 +33,10 @@ export function createTask(db: DatabaseSync, project: Project, input: CreateTask
   const path = createWorktree(project, id);
   const now = new Date().toISOString();
 
+  const taken = (db.prepare(`SELECT deskIndex FROM tasks`).all() as { deskIndex: number | null }[]).map(
+    (row) => row.deskIndex
+  );
+
   const task: Task = {
     id,
     projectId: project.id,
@@ -42,7 +47,7 @@ export function createTask(db: DatabaseSync, project: Project, input: CreateTask
     branchName: branchName(id),
     worktreePath: path,
     prUrl: null,
-    deskIndex: null,
+    deskIndex: allocateDeskIndex(taken),
     pendingQuestion: null,
     createdAt: now,
     updatedAt: now,

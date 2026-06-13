@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 import SidePanel from './SidePanel'
+import OfficeCanvas from './OfficeCanvas'
 
 interface Project {
   id: string
@@ -21,6 +22,7 @@ interface Task {
   worktreePath: string
   prUrl: string | null
   pendingQuestion: string | null
+  deskIndex: number | null
 }
 
 function App() {
@@ -61,6 +63,9 @@ function App() {
 
     loadProjects()
     loadTasks()
+
+    const interval = setInterval(loadTasks, 3000)
+    return () => clearInterval(interval)
   }, [])
 
   const addProject = async (e: React.FormEvent) => {
@@ -132,6 +137,9 @@ function App() {
           </li>
         ))}
       </ul>
+
+      <h2>Office</h2>
+      <OfficeCanvas tasks={tasks} onSelect={setSelectedTaskId} />
 
       <h2>Tasks</h2>
       <form onSubmit={addTask}>
