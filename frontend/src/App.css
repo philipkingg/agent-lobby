@@ -9,6 +9,40 @@
   color: #c0392b;
 }
 
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  position: relative;
+}
+
+.settings-toggle {
+  position: absolute;
+  right: 0;
+}
+
+.settings-menu {
+  text-align: left;
+  background: #f5f5f5;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+}
+
+.settings-menu h2 {
+  margin-top: 0;
+}
+
+.settings-section {
+  margin-bottom: 1rem;
+}
+
+.settings-section h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+}
+
 .app ul {
   list-style: none;
   padding: 0;
