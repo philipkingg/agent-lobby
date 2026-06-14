@@ -23,20 +23,20 @@ interface OfficeCanvasProps {
 const FLOOR_BG = 0x100d0a
 const FLOOR_TILE_A = 0x1b1611
 const FLOOR_TILE_B = 0x191510
-const STRIPE_HEIGHT = 6
+// 32px source tiles rendered at DESK_SIZE/32 so a desk+chair sprite fills one desk cell.
+const SPRITE_SCALE = DESK_SIZE / 32
 const BADGE_COLORS: Record<string, number> = {
   question: 0xffc107,
   error: 0xe53935,
 }
 
-// Pixel-art tiles cropped from Kenney's "Roguelike/RPG Pack" (CC0) - see public/sprites/CREDITS.txt
+// Pixel-art tiles cropped from LimeZu's "Modern Interiors" pack - see public/sprites/CREDITS.txt
 const SPRITE_URLS = {
   deskA: '/sprites/desk-a.png',
   deskB: '/sprites/desk-b.png',
-  chair: '/sprites/chair.png',
-  cabinet: '/sprites/cabinet.png',
+  agent: '/sprites/agent.png',
   plant: '/sprites/plant.png',
-  tree: '/sprites/tree.png',
+  plantSmall: '/sprites/plant-small.png',
   door: '/sprites/door.png',
   rug: '/sprites/rug.png',
 } as const
@@ -55,14 +55,9 @@ function drawFloor(g: PixiGraphics, width: number, height: number) {
   }
 }
 
-function drawAccentStripe(g: PixiGraphics, accentColor: number) {
+function drawAccentMark(g: PixiGraphics, accentColor: number) {
   g.clear()
-  g.rect(0, 0, DESK_SIZE, STRIPE_HEIGHT).fill(accentColor)
-}
-
-function drawAgent(g: PixiGraphics, color: number) {
-  g.clear()
-  g.circle(0, 0, DESK_SIZE / 5).fill(color)
+  g.rect(0, 0, 8, 8).fill(accentColor)
 }
 
 function drawBadge(g: PixiGraphics, color: number) {
@@ -72,32 +67,32 @@ function drawBadge(g: PixiGraphics, color: number) {
 
 /** Animates an agent sprite per its status: bobbing while working, pulsing
  * while blocked/erroring, and a tilted "slacking off" pose once done. */
-function AnimatedAgent({ color, animation }: { color: number; animation: Animation }) {
+function AnimatedAgent({ texture, color, animation }: { texture: Texture; color: number; animation: Animation }) {
   const [t, setT] = useState(0)
   useTick((ticker) => setT((prev) => prev + ticker.deltaTime))
 
   let x = 0
   let y = 0
   let rotation = 0
-  let scale = 1
+  let scale = SPRITE_SCALE
 
   if (animation === 'bob') {
     y = Math.sin(t / 10) * 3
   } else if (animation === 'pulse') {
-    scale = 1 + Math.sin(t / 6) * 0.15
+    scale = SPRITE_SCALE * (1 + Math.sin(t / 6) * 0.1)
   } else if (animation === 'slack') {
     rotation = Math.PI / 8
   }
 
-  return <pixiGraphics x={x} y={y} rotation={rotation} scale={scale} draw={(g) => drawAgent(g, color)} />
+  return <pixiSprite texture={texture} x={x} y={y} rotation={rotation} scale={scale} tint={color} />
 }
 
-/** A 16x16 pixel-art tile from the office sprite sheet, drawn crisp (no smoothing) at the given scale. */
+/** A pixel-art tile from the office sprite sheet, drawn crisp (no smoothing) at the given scale. */
 function PixelSprite({
   texture,
   x,
   y,
-  scale = DESK_SIZE / 16,
+  scale = SPRITE_SCALE,
   alpha = 1,
 }: {
   texture: Texture
@@ -143,12 +138,11 @@ function OfficeCanvas({ tasks, onSelect }: OfficeCanvasProps) {
 
       {textures && (
         <>
-          <PixelSprite texture={textures.door} x={DESK_MARGIN + 32} y={4} scale={3} />
-          <PixelSprite texture={textures.tree} x={8} y={officeHeight - 70} scale={3.5} />
-          <PixelSprite texture={textures.plant} x={officeWidth - 56} y={16} scale={3} />
-          <PixelSprite texture={textures.plant} x={officeWidth - 56} y={officeHeight - 60} scale={3} />
-          <PixelSprite texture={textures.cabinet} x={officeWidth - 60} y={height / 2} scale={3} />
-          <PixelSprite texture={textures.rug} x={12} y={20} scale={3} />
+          <PixelSprite texture={textures.door} x={DESK_MARGIN + 16} y={0} />
+          <PixelSprite texture={textures.plant} x={officeWidth - DESK_SIZE} y={16} />
+          <PixelSprite texture={textures.plant} x={officeWidth - DESK_SIZE} y={officeHeight - DESK_SIZE - 16} />
+          <PixelSprite texture={textures.plantSmall} x={12} y={16} />
+          <PixelSprite texture={textures.rug} x={12} y={officeHeight - DESK_SIZE - 16} />
         </>
       )}
 
@@ -173,13 +167,12 @@ function OfficeCanvas({ tasks, onSelect }: OfficeCanvasProps) {
             ) : (
               <pixiGraphics draw={(g) => g.clear().rect(0, 0, DESK_SIZE, DESK_SIZE).fill(0x2a221b)} />
             )}
-            {textures && <PixelSprite texture={textures.chair} x={0} y={DESK_SIZE * 0.55} />}
-            <pixiGraphics y={DESK_SIZE - STRIPE_HEIGHT} draw={(g) => drawAccentStripe(g, accentColor)} />
-            {visual && (
-              <pixiContainer x={DESK_SIZE * 0.72} y={DESK_SIZE * 0.32}>
-                <AnimatedAgent color={visual.color} animation={visual.animation} />
+            {visual && textures && (
+              <pixiContainer x={DESK_SIZE / 2} y={0}>
+                <AnimatedAgent texture={textures.agent} color={visual.color} animation={visual.animation} />
               </pixiContainer>
             )}
+            <pixiGraphics x={2} y={2} draw={(g) => drawAccentMark(g, accentColor)} />
             {visual?.badge && (
               <pixiGraphics
                 x={DESK_SIZE - 4}
