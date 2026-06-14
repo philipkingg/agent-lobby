@@ -24,6 +24,25 @@ const neverQuery: QueryFn = async function* () {
   await new Promise(() => {});
 };
 
+// Hangs until aborted, then rejects like the real SDK does when its abortController fires.
+const abortableQuery: QueryFn = async function* (params) {
+  yield {
+    type: "assistant",
+    uuid: "u1",
+    session_id: "sess-abort",
+    message: { content: [{ type: "text", text: "working" }] },
+    parent_tool_use_id: null,
+  } as never;
+
+  await new Promise((_resolve, reject) => {
+    params.options?.abortController?.signal.addEventListener("abort", () => {
+      const err = new Error("aborted");
+      err.name = "AbortError";
+      reject(err);
+    });
+  });
+};
+
 // Reports a session id, then hangs - simulates a task still "running" at the moment of a server restart.
 const hangAfterSessionQuery: QueryFn = async function* () {
   yield {
@@ -197,6 +216,47 @@ describe("/projects/:id/tasks", () => {
 
     const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
     expect(getResponse.json().status).toBe("stopped");
+
+    const secondStop = await app.inject({ method: "POST", url: `/tasks/${task.id}/stop` });
+    expect(secondStop.statusCode).toBe(409);
+  });
+
+  it("creates an sdk task and stops it via /tasks/:id/stop", async () => {
+    const app = buildApp(undefined, abortableQuery);
+
+    const projectResponse = await app.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { source: "path", value: repoDir },
+    });
+    const project = projectResponse.json();
+
+    const taskResponse = await app.inject({
+      method: "POST",
+      url: `/projects/${project.id}/tasks`,
+      payload: { description: "do the thing", mode: "sdk" },
+    });
+    expect(taskResponse.statusCode).toBe(201);
+    const task = taskResponse.json();
+
+    let body: { sessionId: string | null } = { sessionId: null };
+    for (let i = 0; i < 50 && !body.sessionId; i++) {
+      const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
+      body = getResponse.json();
+      if (!body.sessionId) await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(body.sessionId).toBe("sess-abort");
+
+    const stopResponse = await app.inject({ method: "POST", url: `/tasks/${task.id}/stop` });
+    expect(stopResponse.statusCode).toBe(200);
+
+    let status = "running";
+    for (let i = 0; i < 50 && status !== "stopped"; i++) {
+      const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
+      status = getResponse.json().status;
+      if (status !== "stopped") await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(status).toBe("stopped");
 
     const secondStop = await app.inject({ method: "POST", url: `/tasks/${task.id}/stop` });
     expect(secondStop.statusCode).toBe(409);

@@ -47,6 +47,7 @@ function findAskUserQuestion(msg: SDKMessage): string | undefined {
  */
 export class AgentRunner {
   private pending = new Map<string, { promise: Promise<string>; resolve: (answer: string) => void }>();
+  private controllers = new Map<string, AbortController>();
 
   constructor(
     private db: DatabaseSync,
@@ -61,6 +62,20 @@ export class AgentRunner {
     this.pending.delete(taskId);
     pending.resolve(answer);
     return true;
+  }
+
+  /** Cancels a running task's SDK query. Returns false if it wasn't running. */
+  cancel(taskId: string): boolean {
+    const controller = this.controllers.get(taskId);
+    if (!controller) return false;
+    controller.abort();
+    return true;
+  }
+
+  /** Drops any in-memory state (pending AskUser, abort controller) for a task. */
+  private clear(taskId: string): void {
+    this.controllers.delete(taskId);
+    this.pending.delete(taskId);
   }
 
   private waitForAnswer(taskId: string): Promise<string> {
@@ -88,12 +103,16 @@ export class AgentRunner {
 
     const server = createSdkMcpServer({ name: "agent-office", tools: [askUserTool] });
 
+    const controller = new AbortController();
+    this.controllers.set(task.id, controller);
+
     const stream = this.queryFn({
       prompt: task.description,
       options: {
         cwd: task.worktreePath,
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
+        abortController: controller,
         mcpServers: { "agent-office": server },
         ...(task.sessionId ? { resume: task.sessionId } : {}),
       },
@@ -126,10 +145,17 @@ export class AgentRunner {
         }
       }
     } catch (err) {
+      if (controller.signal.aborted) {
+        setTaskStatus(this.db, task.id, "stopped");
+        this.broadcast(task.id, { type: "status", status: "stopped" });
+        return;
+      }
       if (!task.sessionId) throw err;
       const message = err instanceof Error ? err.message : String(err);
       setTaskFailed(this.db, task.id, message);
       this.broadcast(task.id, { type: "status", status: "failed" });
+    } finally {
+      this.clear(task.id);
     }
   }
 }

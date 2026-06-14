@@ -65,6 +65,15 @@ function makeTask(db: ReturnType<typeof createDb>, overrides: Partial<Task> = {}
   return task;
 }
 
+const successQuery: QueryFn = async function* () {
+  yield {
+    type: "result",
+    subtype: "success",
+    uuid: "u1",
+    session_id: "sess-1",
+  } as never;
+};
+
 describe("AgentRunner.run", () => {
   it("persists transcript entries, session id, and marks the task done on success", async () => {
     const db = createDb();
@@ -192,6 +201,58 @@ describe("AgentRunner.run", () => {
 
     expect(receivedResume).toBe("sess-123");
     expect(getTask(db, task.id)!.status).toBe("done");
+  });
+
+  it("cancel() aborts a running task and marks it stopped", async () => {
+    const db = createDb();
+    const task = makeTask(db);
+    const events: AgentEvent[] = [];
+
+    const fakeQuery: QueryFn = async function* (params) {
+      yield {
+        type: "assistant",
+        uuid: "u1",
+        session_id: "sess-1",
+        message: { content: [{ type: "text", text: "working" }] },
+        parent_tool_use_id: null,
+      } as never;
+
+      // Mirrors the real SDK: hangs until the abort signal fires, then rejects.
+      await new Promise((_resolve, reject) => {
+        params.options?.abortController?.signal.addEventListener("abort", () => {
+          const err = new Error("aborted");
+          err.name = "AbortError";
+          reject(err);
+        });
+      });
+    };
+
+    const runner = new AgentRunner(db, (taskId, event) => events.push(event), fakeQuery);
+    const runPromise = runner.run(task, project);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(runner.cancel(task.id)).toBe(true);
+    await runPromise;
+
+    expect(getTask(db, task.id)!.status).toBe("stopped");
+    expect(events.filter((e) => e.type === "status")).toEqual([{ type: "status", status: "stopped" }]);
+  });
+
+  it("cancel() returns false when the task is not running", () => {
+    const db = createDb();
+    const runner = new AgentRunner(db, () => {});
+    expect(runner.cancel("no-such-task")).toBe(false);
+  });
+
+  it("clears in-memory state once a task finishes, so cancel() no longer applies", async () => {
+    const db = createDb();
+    const task = makeTask(db);
+
+    const runner = new AgentRunner(db, () => {}, successQuery);
+    await runner.run(task, project);
+
+    expect(getTask(db, task.id)!.status).toBe("done");
+    expect(runner.cancel(task.id)).toBe(false);
   });
 
   it("marks a resumed task as failed (with error detail) if the resume throws", async () => {

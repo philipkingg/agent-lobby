@@ -254,8 +254,9 @@ export function buildApp(
       return reply.code(404).send({ error: "task not found" });
     }
 
-    if (!ptyManager.stop(id)) {
-      return reply.code(409).send({ error: "task has no running pty session" });
+    const stopped = task.mode === "sdk" ? runner.cancel(id) : ptyManager.stop(id);
+    if (!stopped) {
+      return reply.code(409).send({ error: "task is not running" });
     }
 
     return { ok: true };
