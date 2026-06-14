@@ -65,6 +65,22 @@
   margin-right: 0.4rem;
 }
 
+.transcript-simple {
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid #eee;
+}
+
+.simple-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+
 .pending-question {
   font-weight: bold;
 }

@@ -47,11 +47,37 @@ function summarize(entry: TranscriptEntry): string {
   }
 }
 
+/** Plain-language summary for "simple mode": only what the agent said and which
+ * tools it used, skipping raw system/user/stream noise. Returns null to hide an entry. */
+function simpleSummarize(entry: TranscriptEntry): string | null {
+  try {
+    const parsed = JSON.parse(entry.content)
+    if (entry.type === 'assistant') {
+      const blocks = (parsed.message?.content ?? []) as { type: string; text?: string; name?: string }[]
+      const parts = blocks
+        .map((b) => {
+          if (b.type === 'text') return b.text?.trim()
+          if (b.type === 'tool_use') return `→ used ${b.name}`
+          return null
+        })
+        .filter((b): b is string => !!b)
+      return parts.length ? parts.join('\n') : null
+    }
+    if (entry.type === 'result') {
+      return parsed.result ?? `Finished (${parsed.subtype})`
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 function SidePanel({ task, onClose, onTaskUpdate }: SidePanelProps) {
   const [entries, setEntries] = useState<TranscriptEntry[]>([])
   const [status, setStatus] = useState(task.status)
   const [pendingQuestion, setPendingQuestion] = useState(task.pendingQuestion)
   const [reply, setReply] = useState('')
+  const [simpleMode, setSimpleMode] = useState(true)
   const logRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -117,13 +143,33 @@ function SidePanel({ task, onClose, onTaskUpdate }: SidePanelProps) {
       </p>
 
       {task.mode === 'sdk' ? (
-        <div className="transcript-log" ref={logRef}>
-          {entries.map((entry) => (
-            <div key={entry.id} className={`transcript-entry transcript-${entry.type}`}>
-              <span className="transcript-type">{entry.type}</span> {summarize(entry)}
-            </div>
-          ))}
-        </div>
+        <>
+          <label className="simple-mode-toggle">
+            <input
+              type="checkbox"
+              checked={simpleMode}
+              onChange={(e) => setSimpleMode(e.target.checked)}
+            />
+            Simple mode
+          </label>
+          <div className="transcript-log" ref={logRef}>
+            {simpleMode
+              ? entries.map((entry) => {
+                  const text = simpleSummarize(entry)
+                  if (text === null) return null
+                  return (
+                    <div key={entry.id} className="transcript-entry transcript-simple">
+                      {text}
+                    </div>
+                  )
+                })
+              : entries.map((entry) => (
+                  <div key={entry.id} className={`transcript-entry transcript-${entry.type}`}>
+                    <span className="transcript-type">{entry.type}</span> {summarize(entry)}
+                  </div>
+                ))}
+          </div>
+        </>
       ) : (
         <>
           <PtyTerminal taskId={task.id} onStatus={setStatus} />
