@@ -2,8 +2,8 @@ import Fastify from "fastify";
 import websocketPlugin from "@fastify/websocket";
 import type { DatabaseSync } from "node:sqlite";
 import { createDb } from "./db.js";
-import { createProject, listProjects, getProject, InvalidProjectPathError, type GitExecFn } from "./projects.js";
-import { listTasks, getTask, setTaskStatus, setTaskPrResult, setTaskFailed, setTaskWorktreeRemoved, deleteTask, closeTask, type Task, type TaskMode } from "./tasks.js";
+import { createProject, listProjects, getProject, deleteProject, InvalidProjectPathError, type GitExecFn } from "./projects.js";
+import { listTasks, listTasksByProject, getTask, setTaskStatus, setTaskPrResult, setTaskFailed, setTaskWorktreeRemoved, deleteTask, closeTask, type Task, type TaskMode } from "./tasks.js";
 import { WorktreeError, removeWorktree } from "./worktrees.js";
 import { listTranscriptEntries } from "./transcripts.js";
 import { AgentRunner, type QueryFn } from "./agent-runner.js";
@@ -157,6 +157,30 @@ export function buildApp(
 
   app.get("/projects", async () => {
     return listProjects(db);
+  });
+
+  app.delete("/projects/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = getProject(db, id);
+    if (!project) {
+      return reply.code(404).send({ error: "project not found" });
+    }
+
+    // Cancel any in-flight agents and clean up worktrees before removing the
+    // project and its tasks from the database.
+    for (const task of listTasksByProject(db, id)) {
+      cancelTask(task);
+      if (!task.worktreeRemoved) {
+        try {
+          removeWorktree(project, task.id);
+        } catch {
+          // worktree may already be gone - project removal proceeds regardless.
+        }
+      }
+    }
+
+    deleteProject(db, id);
+    return { ok: true };
   });
 
   app.post("/projects/:id/tasks", async (request, reply) => {

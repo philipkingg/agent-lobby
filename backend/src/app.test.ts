@@ -115,6 +115,31 @@ describe("/projects", () => {
     expect(response.statusCode).toBe(400);
     rmSync(nonGit, { recursive: true, force: true });
   });
+
+  it("DELETE removes a project from the list", async () => {
+    const app = buildApp();
+
+    const postResponse = await app.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { source: "path", value: repoDir },
+    });
+    const created = postResponse.json();
+
+    const deleteResponse = await app.inject({ method: "DELETE", url: `/projects/${created.id}` });
+    expect(deleteResponse.statusCode).toBe(200);
+    expect(deleteResponse.json()).toEqual({ ok: true });
+
+    const getResponse = await app.inject({ method: "GET", url: "/projects" });
+    expect(getResponse.json()).toEqual([]);
+  });
+
+  it("DELETE returns 404 for an unknown project", async () => {
+    const app = buildApp();
+
+    const response = await app.inject({ method: "DELETE", url: "/projects/no-such-project" });
+    expect(response.statusCode).toBe(404);
+  });
 });
 
 describe("/projects/:id/tasks", () => {

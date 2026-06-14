@@ -10,10 +10,13 @@ import {
   deriveClonePath,
   createProject,
   listProjects,
+  getProject,
+  deleteProject,
   InvalidProjectPathError,
   type GitExecFn,
 } from "./projects.js";
 import { createDb } from "./db.js";
+import { createTask } from "./tasks.js";
 
 let repoDir: string;
 let plainDir: string;
@@ -102,5 +105,21 @@ describe("createProject / listProjects", () => {
     expect(() => createProject(db, { source: "url", value: "https://github.com/acme/widgets.git" }, gitExec)).toThrow(
       InvalidProjectPathError
     );
+  });
+});
+
+describe("deleteProject", () => {
+  it("removes the project and its tasks", () => {
+    const db = createDb();
+    const project = createProject(db, { source: "path", value: repoDir });
+    const task = createTask(db, project, { description: "do the thing", mode: "sdk" });
+
+    deleteProject(db, project.id);
+
+    expect(getProject(db, project.id)).toBeUndefined();
+    expect(listProjects(db)).toEqual([]);
+    expect(db.prepare("SELECT * FROM tasks WHERE id = ?").get(task.id)).toBeUndefined();
+
+    rmSync(task.worktreePath, { recursive: true, force: true });
   });
 });

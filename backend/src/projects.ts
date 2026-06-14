@@ -110,3 +110,11 @@ export function getProject(db: DatabaseSync, id: string): Project | undefined {
   const row = db.prepare(`SELECT * FROM projects WHERE id = ?`).get(id);
   return row as Project | undefined;
 }
+
+export function deleteProject(db: DatabaseSync, id: string): void {
+  db.prepare(
+    `DELETE FROM transcript_entries WHERE taskId IN (SELECT id FROM tasks WHERE projectId = ?)`
+  ).run(id);
+  db.prepare(`DELETE FROM tasks WHERE projectId = ?`).run(id);
+  db.prepare(`DELETE FROM projects WHERE id = ?`).run(id);
+}
