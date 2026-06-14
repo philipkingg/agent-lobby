@@ -170,6 +170,11 @@ export function listTasks(db: DatabaseSync): Task[] {
   return rows as unknown as Task[];
 }
 
+export function listTasksByProject(db: DatabaseSync, projectId: string): Task[] {
+  const rows = db.prepare(`SELECT * FROM tasks WHERE projectId = ? ORDER BY createdAt ASC`).all(projectId);
+  return rows as unknown as Task[];
+}
+
 export function getTask(db: DatabaseSync, id: string): Task | undefined {
   const row = db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(id);
   return row as Task | undefined;

@@ -109,6 +109,22 @@ function App() {
     loadProjects()
   }
 
+  const removeProject = async (projectId: string) => {
+    setError(null)
+
+    const res = await fetch(`/api/projects/${projectId}`, { method: 'DELETE' })
+
+    if (!res.ok) {
+      const body = await res.json()
+      setError(body.error ?? 'failed to remove project')
+      return
+    }
+
+    if (taskProjectId === projectId) setTaskProjectId('')
+    loadProjects()
+    loadTasks()
+  }
+
   const addTask = async (e: React.FormEvent) => {
     e.preventDefault()
     setTaskError(null)
@@ -208,6 +224,10 @@ function App() {
           {projects.map((p) => (
             <li key={p.id}>
               <strong>{p.name}</strong> — {p.path} (default branch: {p.defaultBranch})
+              {' '}
+              <button type="button" onClick={() => removeProject(p.id)}>
+                Remove
+              </button>
             </li>
           ))}
         </ul>
