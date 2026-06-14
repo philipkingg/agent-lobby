@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { getProject, type Project } from "./projects.js";
-import { createTask, setTaskStatus, type CreateTaskInput, type Task } from "./tasks.js";
+import { createTask, createDraftTask, startTask, setTaskStatus, type CreateTaskInput, type Task } from "./tasks.js";
 import { getMaxConcurrentAgents } from "./settings.js";
 
 export type DispatchFn = (task: Task, project: Project) => void;
@@ -25,6 +25,25 @@ export class TaskManager {
     }
 
     return task;
+  }
+
+  /** Creates a "draft" ticket in the New column. No worktree/dispatch until it's started. */
+  createDraft(project: Project, input: CreateTaskInput): Task {
+    return createDraftTask(this.db, project, input);
+  }
+
+  /** Moves a draft ticket to Todo: creates its worktree, then runs it immediately if a slot is free. */
+  startTicket(project: Project, task: Task): Task {
+    const started = startTask(this.db, project, task);
+
+    if (this.runningCount() >= this.maxConcurrent()) {
+      return started;
+    }
+
+    setTaskStatus(this.db, started.id, "running");
+    started.status = "running";
+    this.dispatch(started, project);
+    return started;
   }
 
   /** Call when a task reaches a terminal status (done/error/stopped/failed). */

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import './App.css'
 import SidePanel from './SidePanel'
 import OfficeCanvas from './OfficeCanvas'
+import KanbanBoard from './KanbanBoard'
 
 interface Project {
   id: string
@@ -120,7 +121,7 @@ function App() {
     const res = await fetch(`/api/projects/${taskProjectId}/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ description: taskDescription, mode: taskMode }),
+      body: JSON.stringify({ description: taskDescription, mode: taskMode, draft: true }),
     })
 
     if (!res.ok) {
@@ -130,6 +131,16 @@ function App() {
     }
 
     setTaskDescription('')
+    loadTasks()
+  }
+
+  const startTicket = async (taskId: string) => {
+    await fetch(`/api/tasks/${taskId}/start`, { method: 'POST' })
+    loadTasks()
+  }
+
+  const closeTicket = async (taskId: string) => {
+    await fetch(`/api/tasks/${taskId}/close`, { method: 'POST' })
     loadTasks()
   }
 
@@ -153,10 +164,6 @@ function App() {
     if (selectedTaskId === taskId) setSelectedTaskId(null)
     loadTasks()
   }
-
-  const activeTasks = (tasks ?? []).filter((t) => t.status !== 'done' && t.status !== 'failed')
-  const completedTasks = (tasks ?? []).filter((t) => t.status === 'done')
-  const failedTasks = (tasks ?? []).filter((t) => t.status === 'failed')
 
   return (
     <div className="app">
@@ -209,7 +216,7 @@ function App() {
       <h2>Office</h2>
       <OfficeCanvas tasks={tasks ?? []} onSelect={setSelectedTaskId} />
 
-      <h2>Tasks</h2>
+      <h2>Board</h2>
       <form onSubmit={addTask}>
         <select value={taskProjectId} onChange={(e) => setTaskProjectId(e.target.value)}>
           {(projects ?? []).map((p) => (
@@ -228,81 +235,23 @@ function App() {
           <option value="sdk">sdk</option>
           <option value="pty">pty</option>
         </select>
-        <button type="submit">New Task</button>
+        <button type="submit">New Ticket</button>
       </form>
       {taskError && <p className="error">{taskError}</p>}
 
       {tasks === null ? (
         <p>Loading tasks…</p>
-      ) : activeTasks.length === 0 ? (
-        <p>No active tasks.</p>
       ) : (
-        <ul>
-          {activeTasks.map((t) => (
-            <li key={t.id}>
-              <button className="task-link" onClick={() => setSelectedTaskId(t.id)}>
-                <strong>[{t.status}]</strong> {t.description} ({t.mode}, {t.branchName})
-              </button>
-              <button onClick={() => clearTask(t.id)}>Clear</button>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <h2>Completed</h2>
-      {completedTasks.length === 0 ? (
-        <p>No completed tasks yet.</p>
-      ) : (
-      <ul>
-        {completedTasks.map((t) => (
-          <li key={t.id}>
-            <button className="task-link" onClick={() => setSelectedTaskId(t.id)}>
-              {t.description} ({t.mode}, {t.branchName})
-            </button>
-            {t.prUrl && (
-              <a href={t.prUrl} target="_blank" rel="noreferrer">
-                {t.prUrl}
-              </a>
-            )}
-            {t.prError && (
-              <span className="error">
-                {t.prError}{' '}
-                <button onClick={() => retryPr(t.id)}>Retry PR</button>
-              </span>
-            )}
-            {t.worktreeRemoved ? (
-              <span> (worktree removed)</span>
-            ) : (
-              <>
-                <span> {t.worktreePath}</span>
-                <button onClick={() => removeWorktree(t.id)}>Remove Worktree</button>
-              </>
-            )}
-            <button onClick={() => clearTask(t.id)}>Clear</button>
-          </li>
-        ))}
-      </ul>
-      )}
-
-      <h2>Failed</h2>
-      {failedTasks.length === 0 ? (
-        <p>No failed tasks.</p>
-      ) : (
-      <ul>
-        {failedTasks.map((t) => (
-          <li key={t.id}>
-            <button className="task-link" onClick={() => setSelectedTaskId(t.id)}>
-              {t.description} ({t.mode}, {t.branchName})
-            </button>
-            <p className="error">
-              {t.error ?? 'failed'} — worktree: {t.worktreeRemoved ? '(removed)' : t.worktreePath}
-            </p>
-            <button onClick={() => retryTask(t.id)}>Start Fresh Task</button>
-            {!t.worktreeRemoved && <button onClick={() => removeWorktree(t.id)}>Remove Worktree</button>}
-            <button onClick={() => clearTask(t.id)}>Clear</button>
-          </li>
-        ))}
-      </ul>
+        <KanbanBoard
+          tasks={tasks}
+          onSelect={setSelectedTaskId}
+          onStart={startTicket}
+          onClose={closeTicket}
+          onRetryPr={retryPr}
+          onRetryTask={retryTask}
+          onRemoveWorktree={removeWorktree}
+          onClear={clearTask}
+        />
       )}
 
       {selectedTaskId && (

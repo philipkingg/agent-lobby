@@ -19,6 +19,10 @@ describe('agentVisual', () => {
     expect(agentVisual('done')).toEqual({ state: 'done', color: 0x42a5f5, badge: null, animation: 'slack' })
   })
 
+  it('maps closed to the done state with a slack-off animation', () => {
+    expect(agentVisual('closed')).toEqual({ state: 'done', color: 0x42a5f5, badge: null, animation: 'slack' })
+  })
+
   it('maps error and failed to the error state with an error badge and pulse animation', () => {
     expect(agentVisual('error')).toEqual({ state: 'error', color: 0xe53935, badge: 'error', animation: 'pulse' })
     expect(agentVisual('failed')).toEqual({ state: 'error', color: 0xe53935, badge: 'error', animation: 'pulse' })

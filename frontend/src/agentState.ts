@@ -14,6 +14,7 @@ const VISUALS: Record<string, AgentVisual> = {
   running: { state: 'working', color: 0x4caf50, badge: null, animation: 'bob' },
   blocked: { state: 'working', color: 0x4caf50, badge: 'question', animation: 'pulse' },
   done: { state: 'done', color: 0x42a5f5, badge: null, animation: 'slack' },
+  closed: { state: 'done', color: 0x42a5f5, badge: null, animation: 'slack' },
   stopped: { state: 'done', color: 0x90a4ae, badge: null, animation: 'none' },
   error: { state: 'error', color: 0xe53935, badge: 'error', animation: 'pulse' },
   failed: { state: 'error', color: 0xe53935, badge: 'error', animation: 'pulse' },

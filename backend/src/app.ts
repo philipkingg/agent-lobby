@@ -3,7 +3,7 @@ import websocketPlugin from "@fastify/websocket";
 import type { DatabaseSync } from "node:sqlite";
 import { createDb } from "./db.js";
 import { createProject, listProjects, getProject, InvalidProjectPathError, type GitExecFn } from "./projects.js";
-import { listTasks, getTask, setTaskStatus, setTaskPrResult, setTaskFailed, setTaskWorktreeRemoved, deleteTask, type Task, type TaskMode } from "./tasks.js";
+import { listTasks, getTask, setTaskStatus, setTaskPrResult, setTaskFailed, setTaskWorktreeRemoved, deleteTask, closeTask, type Task, type TaskMode } from "./tasks.js";
 import { WorktreeError, removeWorktree } from "./worktrees.js";
 import { listTranscriptEntries } from "./transcripts.js";
 import { AgentRunner, type QueryFn } from "./agent-runner.js";
@@ -14,7 +14,7 @@ import { getMaxConcurrentAgents, setMaxConcurrentAgents } from "./settings.js";
 import type { Project } from "./projects.js";
 import type { WsEvent } from "./ws-events.js";
 
-const TERMINAL_STATUSES = ["done", "error", "stopped", "failed"];
+const TERMINAL_STATUSES = ["done", "error", "stopped", "failed", "closed"];
 
 export function buildApp(
   db: DatabaseSync = createDb(),
@@ -161,7 +161,7 @@ export function buildApp(
 
   app.post("/projects/:id/tasks", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const body = request.body as { description?: string; mode?: string };
+    const body = request.body as { description?: string; mode?: string; draft?: boolean };
 
     if (!body.description || (body.mode !== "sdk" && body.mode !== "pty")) {
       return reply.code(400).send({ error: "expected { description: string, mode: 'sdk' | 'pty' }" });
@@ -170,6 +170,11 @@ export function buildApp(
     const project = getProject(db, id);
     if (!project) {
       return reply.code(404).send({ error: "project not found" });
+    }
+
+    if (body.draft) {
+      const ticket = taskManager.createDraft(project, { description: body.description, mode: body.mode as TaskMode });
+      return reply.code(201).send(ticket);
     }
 
     try {
@@ -181,6 +186,45 @@ export function buildApp(
       }
       throw err;
     }
+  });
+
+  app.post("/tasks/:id/start", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const task = getTask(db, id);
+    if (!task) {
+      return reply.code(404).send({ error: "task not found" });
+    }
+    if (task.status !== "draft") {
+      return reply.code(409).send({ error: "task is not a draft" });
+    }
+
+    const project = getProject(db, task.projectId);
+    if (!project) {
+      return reply.code(404).send({ error: "project not found" });
+    }
+
+    try {
+      return taskManager.startTicket(project, task);
+    } catch (err) {
+      if (err instanceof WorktreeError) {
+        return reply.code(500).send({ error: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/tasks/:id/close", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const task = getTask(db, id);
+    if (!task) {
+      return reply.code(404).send({ error: "task not found" });
+    }
+    if (task.status !== "done") {
+      return reply.code(409).send({ error: "task is not in code review" });
+    }
+
+    closeTask(db, id);
+    return getTask(db, id);
   });
 
   app.get("/tasks", async () => {

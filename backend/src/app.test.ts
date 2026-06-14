@@ -351,6 +351,84 @@ describe("/projects/:id/tasks", () => {
     expect(existsSync(task.worktreePath)).toBe(false);
   });
 
+  it("supports the draft -> start -> done -> close kanban lifecycle", async () => {
+    const execFn: ExecFn = (cmd) => (cmd === "gh" ? "https://github.com/acme/repo/pull/7\n" : "");
+    const app = buildApp(undefined, successQuery, undefined, execFn);
+
+    const projectResponse = await app.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { source: "path", value: repoDir },
+    });
+    const project = projectResponse.json();
+
+    // Create as a draft ticket: no worktree/branch/desk yet.
+    const ticketResponse = await app.inject({
+      method: "POST",
+      url: `/projects/${project.id}/tasks`,
+      payload: { description: "do the thing", mode: "sdk", draft: true },
+    });
+    expect(ticketResponse.statusCode).toBe(201);
+    const ticket = ticketResponse.json();
+    expect(ticket.status).toBe("draft");
+    expect(ticket.branchName).toBe("");
+    expect(ticket.worktreePath).toBe("");
+    expect(ticket.deskIndex).toBeNull();
+
+    // Starting it creates the worktree and dispatches it.
+    const startResponse = await app.inject({ method: "POST", url: `/tasks/${ticket.id}/start` });
+    expect(startResponse.statusCode).toBe(200);
+    const started = startResponse.json();
+    expect(started.branchName).toBe(`agent/do-the-thing-${ticket.id.slice(0, 8)}`);
+    expect(existsSync(started.worktreePath)).toBe(true);
+
+    // Starting again is rejected - it's no longer a draft.
+    const restartResponse = await app.inject({ method: "POST", url: `/tasks/${ticket.id}/start` });
+    expect(restartResponse.statusCode).toBe(409);
+
+    let body: { status: string } = { status: "running" };
+    for (let i = 0; i < 50 && body.status !== "done"; i++) {
+      const getResponse = await app.inject({ method: "GET", url: `/tasks/${ticket.id}` });
+      body = getResponse.json();
+      if (body.status !== "done") await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(body.status).toBe("done");
+
+    // Closing a "done" (in code review) ticket moves it to "closed" (Done column).
+    const closeResponse = await app.inject({ method: "POST", url: `/tasks/${ticket.id}/close` });
+    expect(closeResponse.statusCode).toBe(200);
+    expect(closeResponse.json().status).toBe("closed");
+
+    // Closing again is rejected - it's no longer "done".
+    const recloseResponse = await app.inject({ method: "POST", url: `/tasks/${ticket.id}/close` });
+    expect(recloseResponse.statusCode).toBe(409);
+  });
+
+  it("returns 409 starting a non-draft task and 409 closing a non-done task", async () => {
+    const app = buildApp(undefined, neverQuery);
+
+    const projectResponse = await app.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { source: "path", value: repoDir },
+    });
+    const project = projectResponse.json();
+
+    const taskResponse = await app.inject({
+      method: "POST",
+      url: `/projects/${project.id}/tasks`,
+      payload: { description: "do the thing", mode: "sdk" },
+    });
+    const task = taskResponse.json();
+    expect(task.status).toBe("running");
+
+    const startResponse = await app.inject({ method: "POST", url: `/tasks/${task.id}/start` });
+    expect(startResponse.statusCode).toBe(409);
+
+    const closeResponse = await app.inject({ method: "POST", url: `/tasks/${task.id}/close` });
+    expect(closeResponse.statusCode).toBe(409);
+  });
+
   it("deletes a completed task and its worktree via DELETE /tasks/:id", async () => {
     const execFn: ExecFn = (cmd) => (cmd === "gh" ? "https://github.com/acme/repo/pull/7\n" : "");
     const app = buildApp(undefined, successQuery, undefined, execFn);

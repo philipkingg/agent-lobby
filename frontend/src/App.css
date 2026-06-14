@@ -1,5 +1,5 @@
 .app {
-  max-width: 600px;
+  max-width: 1100px;
   margin: 4rem auto;
   text-align: center;
   font-family: system-ui, sans-serif;
@@ -24,6 +24,63 @@
   padding: 0.25rem 0;
   font: inherit;
   cursor: pointer;
+}
+
+.kanban-board {
+  display: flex;
+  gap: 0.75rem;
+  text-align: left;
+  overflow-x: auto;
+  padding-bottom: 1rem;
+}
+
+.kanban-column {
+  flex: 1 0 180px;
+  min-width: 180px;
+  background: #f5f5f5;
+  border-radius: 6px;
+  padding: 0.5rem;
+}
+
+.kanban-column h3 {
+  margin: 0.25rem 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+.kanban-column.over {
+  background: #e0e0e0;
+}
+
+.kanban-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 40px;
+}
+
+.kanban-card {
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 0.5rem;
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  cursor: grab;
+}
+
+.kanban-card.dragging {
+  opacity: 0.6;
+}
+
+.kanban-card-title {
+  font-weight: 600;
+}
+
+.kanban-card-meta {
+  color: #888;
+  font-size: 0.75rem;
 }
 
 .side-panel {

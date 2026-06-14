@@ -5,7 +5,7 @@ import { branchName, createWorktree } from "./worktrees.js";
 import { allocateDeskIndex } from "./desks.js";
 
 export type TaskMode = "sdk" | "pty";
-export type TaskStatus = "queued" | "running" | "blocked" | "done" | "error" | "stopped" | "failed";
+export type TaskStatus = "draft" | "queued" | "running" | "blocked" | "done" | "error" | "stopped" | "failed" | "closed";
 
 export interface Task {
   id: string;
@@ -82,6 +82,82 @@ export function createTask(db: DatabaseSync, project: Project, input: CreateTask
   );
 
   return task;
+}
+
+/** Creates a "draft" ticket: no worktree/branch/desk yet, just a record waiting in the "New" column. */
+export function createDraftTask(db: DatabaseSync, project: Project, input: CreateTaskInput): Task {
+  const id = randomUUID();
+  const now = new Date().toISOString();
+
+  const task: Task = {
+    id,
+    projectId: project.id,
+    description: input.description,
+    mode: input.mode,
+    status: "draft",
+    sessionId: null,
+    branchName: "",
+    worktreePath: "",
+    prUrl: null,
+    prError: null,
+    error: null,
+    worktreeRemoved: 0,
+    deskIndex: null,
+    pendingQuestion: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  db.prepare(
+    `INSERT INTO tasks
+      (id, projectId, description, mode, status, sessionId, branchName, worktreePath, prUrl, prError, error, deskIndex, pendingQuestion, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    task.id,
+    task.projectId,
+    task.description,
+    task.mode,
+    task.status,
+    task.sessionId,
+    task.branchName,
+    task.worktreePath,
+    task.prUrl,
+    task.prError,
+    task.error,
+    task.deskIndex,
+    task.pendingQuestion,
+    task.createdAt,
+    task.updatedAt
+  );
+
+  return task;
+}
+
+/** Moves a draft ticket into the "Todo" column: creates its worktree/branch and allocates a desk. */
+export function startTask(db: DatabaseSync, project: Project, task: Task): Task {
+  const path = createWorktree(project, task.id, task.description);
+  const branch = branchName(task.id, task.description);
+
+  const taken = (db.prepare(`SELECT deskIndex FROM tasks`).all() as { deskIndex: number | null }[]).map(
+    (row) => row.deskIndex
+  );
+  const deskIndex = allocateDeskIndex(taken);
+  const now = new Date().toISOString();
+
+  db.prepare(`UPDATE tasks SET branchName = ?, worktreePath = ?, deskIndex = ?, status = 'queued', updatedAt = ? WHERE id = ?`).run(
+    branch,
+    path,
+    deskIndex,
+    now,
+    task.id
+  );
+
+  return { ...task, branchName: branch, worktreePath: path, deskIndex, status: "queued", updatedAt: now };
+}
+
+/** Moves a "done" (in code review) ticket into the "Done" column. */
+export function closeTask(db: DatabaseSync, id: string): void {
+  db.prepare(`UPDATE tasks SET status = 'closed', updatedAt = ? WHERE id = ?`).run(new Date().toISOString(), id);
 }
 
 export function deleteTask(db: DatabaseSync, id: string): void {
