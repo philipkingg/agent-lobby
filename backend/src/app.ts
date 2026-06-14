@@ -11,6 +11,7 @@ import { PtyManager, type SpawnFn } from "./pty-runner.js";
 import { createPullRequest, type ExecFn } from "./pr-service.js";
 import { TaskManager } from "./task-manager.js";
 import { getMaxConcurrentAgents, setMaxConcurrentAgents } from "./settings.js";
+import { listWorkers } from "./workers.js";
 import type { Project } from "./projects.js";
 import type { WsEvent } from "./ws-events.js";
 
@@ -185,7 +186,7 @@ export function buildApp(
 
   app.post("/projects/:id/tasks", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const body = request.body as { description?: string; mode?: string; draft?: boolean };
+    const body = request.body as { description?: string; mode?: string; draft?: boolean; deskIndex?: number };
 
     if (!body.description || (body.mode !== "sdk" && body.mode !== "pty")) {
       return reply.code(400).send({ error: "expected { description: string, mode: 'sdk' | 'pty' }" });
@@ -201,8 +202,10 @@ export function buildApp(
       return reply.code(201).send(ticket);
     }
 
+    const preferredDeskIndex = typeof body.deskIndex === "number" ? body.deskIndex : undefined;
+
     try {
-      const task = taskManager.createTask(project, { description: body.description, mode: body.mode as TaskMode });
+      const task = taskManager.createTask(project, { description: body.description, mode: body.mode as TaskMode }, preferredDeskIndex);
       return reply.code(201).send(task);
     } catch (err) {
       if (err instanceof WorktreeError) {
@@ -214,6 +217,7 @@ export function buildApp(
 
   app.post("/tasks/:id/start", async (request, reply) => {
     const { id } = request.params as { id: string };
+    const body = request.body as { deskIndex?: number } | undefined;
     const task = getTask(db, id);
     if (!task) {
       return reply.code(404).send({ error: "task not found" });
@@ -227,8 +231,10 @@ export function buildApp(
       return reply.code(404).send({ error: "project not found" });
     }
 
+    const preferredDeskIndex = typeof body?.deskIndex === "number" ? body.deskIndex : undefined;
+
     try {
-      return taskManager.startTicket(project, task);
+      return taskManager.startTicket(project, task, preferredDeskIndex);
     } catch (err) {
       if (err instanceof WorktreeError) {
         return reply.code(500).send({ error: err.message });
@@ -398,6 +404,10 @@ export function buildApp(
 
     deleteTask(db, id);
     return { ok: true };
+  });
+
+  app.get("/workers", async () => {
+    return listWorkers(db, getMaxConcurrentAgents(db));
   });
 
   app.get("/settings", async () => {

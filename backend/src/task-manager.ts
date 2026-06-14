@@ -14,8 +14,8 @@ const RUNNING_STATUSES = ["running", "blocked"];
 export class TaskManager {
   constructor(private db: DatabaseSync, private dispatch: DispatchFn) {}
 
-  createTask(project: Project, input: CreateTaskInput): Task {
-    const task = createTask(this.db, project, input);
+  createTask(project: Project, input: CreateTaskInput, preferredDeskIndex?: number | null): Task {
+    const task = createTask(this.db, project, input, preferredDeskIndex);
 
     if (this.runningCount() > this.maxConcurrent()) {
       setTaskStatus(this.db, task.id, "queued");
@@ -33,8 +33,8 @@ export class TaskManager {
   }
 
   /** Moves a draft ticket to Todo: creates its worktree, then runs it immediately if a slot is free. */
-  startTicket(project: Project, task: Task): Task {
-    const started = startTask(this.db, project, task);
+  startTicket(project: Project, task: Task, preferredDeskIndex?: number | null): Task {
+    const started = startTask(this.db, project, task, preferredDeskIndex);
 
     if (this.runningCount() >= this.maxConcurrent()) {
       return started;

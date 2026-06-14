@@ -603,6 +603,26 @@ describe("/projects/:id/tasks", () => {
     expect(deleteResponse.statusCode).toBe(409);
   });
 
+  it("assigns a task to a specific worker's desk via deskIndex", async () => {
+    const app = buildApp(undefined, neverQuery);
+
+    const projectResponse = await app.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { source: "path", value: repoDir },
+    });
+    const project = projectResponse.json();
+
+    const taskResponse = await app.inject({
+      method: "POST",
+      url: `/projects/${project.id}/tasks`,
+      payload: { description: "do the thing", mode: "sdk", deskIndex: 3 },
+    });
+
+    expect(taskResponse.statusCode).toBe(201);
+    expect(taskResponse.json().deskIndex).toBe(3);
+  });
+
   it("returns 400 for an invalid mode", async () => {
     const app = buildApp();
 
@@ -620,5 +640,33 @@ describe("/projects/:id/tasks", () => {
     });
 
     expect(response.statusCode).toBe(400);
+  });
+});
+
+describe("GET /workers", () => {
+  it("returns one named worker per concurrency slot, stable across requests", async () => {
+    const app = buildApp();
+
+    const first = await app.inject({ method: "GET", url: "/workers" });
+    expect(first.statusCode).toBe(200);
+    const workers = first.json();
+    expect(workers).toHaveLength(4); // default maxConcurrentAgents
+    expect(workers.map((w: { deskIndex: number }) => w.deskIndex)).toEqual([0, 1, 2, 3]);
+    for (const worker of workers) {
+      expect(typeof worker.name).toBe("string");
+      expect(worker.name.length).toBeGreaterThan(0);
+    }
+
+    const second = await app.inject({ method: "GET", url: "/workers" });
+    expect(second.json()).toEqual(workers);
+  });
+
+  it("grows with maxConcurrentAgents", async () => {
+    const app = buildApp();
+
+    await app.inject({ method: "POST", url: "/settings", payload: { maxConcurrentAgents: 6 } });
+
+    const response = await app.inject({ method: "GET", url: "/workers" });
+    expect(response.json()).toHaveLength(6);
   });
 });
