@@ -163,58 +163,13 @@ function SidePanel({
         status: <strong>{status}</strong>
       </p>
 
-      {task.mode === 'sdk' ? (
-        <>
-          <label className="simple-mode-toggle">
-            <input
-              type="checkbox"
-              checked={simpleMode}
-              onChange={(e) => setSimpleMode(e.target.checked)}
-            />
-            Simple mode
-          </label>
-          <div className="transcript-log" ref={logRef}>
-            {simpleMode
-              ? entries.map((entry) => {
-                  const text = simpleSummarize(entry)
-                  if (text === null) return null
-                  return (
-                    <div key={entry.id} className="transcript-entry transcript-simple">
-                      {text}
-                    </div>
-                  )
-                })
-              : entries.map((entry) => (
-                  <div key={entry.id} className={`transcript-entry transcript-${entry.type}`}>
-                    <span className="transcript-type">{entry.type}</span> {summarize(entry)}
-                  </div>
-                ))}
-          </div>
-        </>
-      ) : (
-        <PtyTerminal taskId={task.id} onStatus={setStatus} />
-      )}
-
-      {(status === 'running' || status === 'blocked' || status === 'queued') && (
-        <button className="stop-button" onClick={stopTask}>
-          Stop
-        </button>
-      )}
-
-      {status === 'blocked' && (
-        <form onSubmit={sendReply} className="respond-form">
-          <p className="pending-question">{pendingQuestion}</p>
-          <input
-            type="text"
-            placeholder="your answer"
-            value={reply}
-            onChange={(e) => setReply(e.target.value)}
-          />
-          <button type="submit">Send</button>
-        </form>
-      )}
-
       <div className="side-panel-actions">
+        {(status === 'running' || status === 'blocked' || status === 'queued') && (
+          <button className="stop-button" onClick={stopTask}>
+            Stop
+          </button>
+        )}
+
         {status === 'draft' && <button onClick={() => onStart(task.id)}>Start</button>}
 
         {status === 'done' && (
@@ -248,6 +203,51 @@ function SidePanel({
           <button onClick={() => onClear(task.id)}>Clear</button>
         )}
       </div>
+
+      {task.mode === 'sdk' ? (
+        <>
+          <label className="simple-mode-toggle">
+            <input
+              type="checkbox"
+              checked={simpleMode}
+              onChange={(e) => setSimpleMode(e.target.checked)}
+            />
+            Simple mode
+          </label>
+          <div className="transcript-log" ref={logRef}>
+            {simpleMode
+              ? entries.map((entry) => {
+                  const text = simpleSummarize(entry)
+                  if (text === null) return null
+                  return (
+                    <div key={entry.id} className="transcript-entry transcript-simple">
+                      {text}
+                    </div>
+                  )
+                })
+              : entries.map((entry) => (
+                  <div key={entry.id} className={`transcript-entry transcript-${entry.type}`}>
+                    <span className="transcript-type">{entry.type}</span> {summarize(entry)}
+                  </div>
+                ))}
+          </div>
+        </>
+      ) : (
+        <PtyTerminal taskId={task.id} onStatus={setStatus} />
+      )}
+
+      {status === 'blocked' && (
+        <form onSubmit={sendReply} className="respond-form">
+          <p className="pending-question">{pendingQuestion}</p>
+          <input
+            type="text"
+            placeholder="your answer"
+            value={reply}
+            onChange={(e) => setReply(e.target.value)}
+          />
+          <button type="submit">Send</button>
+        </form>
+      )}
     </div>
   )
 }

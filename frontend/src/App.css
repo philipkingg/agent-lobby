@@ -172,15 +172,11 @@
   margin-top: 0.5rem;
 }
 
-.stop-button {
-  margin-top: 0.5rem;
-  align-self: flex-start;
-}
-
 .side-panel-actions {
-  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 0.4rem;
 }
