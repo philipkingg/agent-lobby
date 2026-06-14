@@ -116,7 +116,9 @@ export class AgentRunner {
 
     const prompt = `${task.description}
 
-You are working on branch ${task.branchName}, which will be opened as a pull request when you finish. Make sure your work is actually committed: as you complete each piece of work, run \`git add\` and \`git commit\` with a clear, descriptive commit message explaining what changed and why. Do not finish with uncommitted changes — if \`git status\` shows anything pending, commit it before you stop.`;
+You are working on branch ${task.branchName}, which will be opened as a pull request when you finish. Make sure your work is actually committed: as you complete each piece of work, run \`git add\` and \`git commit\` with a clear, descriptive commit message explaining what changed and why. Do not finish with uncommitted changes — if \`git status\` shows anything pending, commit it before you stop.
+
+Before you finish, run \`git fetch origin ${project.defaultBranch}\` and merge \`origin/${project.defaultBranch}\` into ${task.branchName} (e.g. \`git merge origin/${project.defaultBranch}\`). If this produces merge conflicts, resolve them yourself, re-test if applicable, and commit the merge before stopping. The PR must be conflict-free against ${project.defaultBranch}.`;
 
     const abortController = new AbortController();
     this.controllers.set(task.id, abortController);
