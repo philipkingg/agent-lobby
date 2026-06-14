@@ -47,6 +47,8 @@ function findAskUserQuestion(msg: SDKMessage): string | undefined {
  */
 export class AgentRunner {
   private pending = new Map<string, { promise: Promise<string>; resolve: (answer: string) => void }>();
+  private controllers = new Map<string, AbortController>();
+  private stopRequested = new Set<string>();
 
   constructor(
     private db: DatabaseSync,
@@ -60,6 +62,30 @@ export class AgentRunner {
     if (!pending) return false;
     this.pending.delete(taskId);
     pending.resolve(answer);
+    return true;
+  }
+
+  /**
+   * Cancels a running (or AskUser-blocked) task. Aborts the SDK query,
+   * unblocks any pending AskUser wait, and marks the task "stopped".
+   * Returns false if the task has no active run to cancel.
+   */
+  stop(taskId: string): boolean {
+    const controller = this.controllers.get(taskId);
+    const pending = this.pending.get(taskId);
+    if (!controller && !pending) return false;
+
+    this.stopRequested.add(taskId);
+
+    if (pending) {
+      this.pending.delete(taskId);
+      pending.resolve("");
+    }
+
+    controller?.abort();
+
+    setTaskStatus(this.db, taskId, "stopped");
+    this.broadcast(taskId, { type: "status", status: "stopped" });
     return true;
   }
 
@@ -92,6 +118,9 @@ export class AgentRunner {
 
 You are working on branch ${task.branchName}, which will be opened as a pull request when you finish. Make sure your work is actually committed: as you complete each piece of work, run \`git add\` and \`git commit\` with a clear, descriptive commit message explaining what changed and why. Do not finish with uncommitted changes — if \`git status\` shows anything pending, commit it before you stop.`;
 
+    const abortController = new AbortController();
+    this.controllers.set(task.id, abortController);
+
     const stream = this.queryFn({
       prompt,
       options: {
@@ -99,6 +128,7 @@ You are working on branch ${task.branchName}, which will be opened as a pull req
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         mcpServers: { "agent-office": server },
+        abortController,
         ...(task.sessionId ? { resume: task.sessionId } : {}),
       },
     });
@@ -119,6 +149,8 @@ You are working on branch ${task.branchName}, which will be opened as a pull req
 
           await this.waitForAnswer(task.id);
 
+          if (this.stopRequested.has(task.id)) break;
+
           clearTaskPendingQuestion(this.db, task.id, "running");
           this.broadcast(task.id, { type: "status", status: "running", pendingQuestion: null });
         }
@@ -130,10 +162,18 @@ You are working on branch ${task.branchName}, which will be opened as a pull req
         }
       }
     } catch (err) {
-      if (!task.sessionId) throw err;
-      const message = err instanceof Error ? err.message : String(err);
-      setTaskFailed(this.db, task.id, message);
-      this.broadcast(task.id, { type: "status", status: "failed" });
+      if (this.stopRequested.has(task.id)) {
+        // Aborted via stop(): status is already "stopped", nothing more to do.
+      } else if (!task.sessionId) {
+        throw err;
+      } else {
+        const message = err instanceof Error ? err.message : String(err);
+        setTaskFailed(this.db, task.id, message);
+        this.broadcast(task.id, { type: "status", status: "failed" });
+      }
+    } finally {
+      this.controllers.delete(task.id);
+      this.stopRequested.delete(task.id);
     }
   }
 }

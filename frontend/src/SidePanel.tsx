@@ -171,14 +171,13 @@ function SidePanel({ task, onClose, onTaskUpdate }: SidePanelProps) {
           </div>
         </>
       ) : (
-        <>
-          <PtyTerminal taskId={task.id} onStatus={setStatus} />
-          {(status === 'running' || status === 'blocked') && (
-            <button className="stop-button" onClick={stopTask}>
-              Stop
-            </button>
-          )}
-        </>
+        <PtyTerminal taskId={task.id} onStatus={setStatus} />
+      )}
+
+      {(status === 'running' || status === 'blocked' || status === 'queued') && (
+        <button className="stop-button" onClick={stopTask}>
+          Stop
+        </button>
       )}
 
       {status === 'blocked' && (

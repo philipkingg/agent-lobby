@@ -385,7 +385,7 @@ describe("/projects/:id/tasks", () => {
     expect(getResponse.statusCode).toBe(404);
   });
 
-  it("rejects deleting a running task", async () => {
+  it("cancels and deletes a running sdk task", async () => {
     const app = buildApp(undefined, neverQuery);
 
     const projectResponse = await app.inject({
@@ -401,9 +401,82 @@ describe("/projects/:id/tasks", () => {
       payload: { description: "do the thing", mode: "sdk" },
     });
     const task = taskResponse.json();
+    expect(task.status).toBe("running");
 
     const deleteResponse = await app.inject({ method: "DELETE", url: `/tasks/${task.id}` });
-    expect(deleteResponse.statusCode).toBe(409);
+    expect(deleteResponse.statusCode).toBe(200);
+    expect(existsSync(task.worktreePath)).toBe(false);
+
+    const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
+    expect(getResponse.statusCode).toBe(404);
+  });
+
+  it("cancels and deletes a running pty task", async () => {
+    const app = buildApp(undefined, neverQuery, fakeSpawnFn());
+
+    const projectResponse = await app.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { source: "path", value: repoDir },
+    });
+    const project = projectResponse.json();
+
+    const taskResponse = await app.inject({
+      method: "POST",
+      url: `/projects/${project.id}/tasks`,
+      payload: { description: "interactive session", mode: "pty" },
+    });
+    const task = taskResponse.json();
+
+    const deleteResponse = await app.inject({ method: "DELETE", url: `/tasks/${task.id}` });
+    expect(deleteResponse.statusCode).toBe(200);
+
+    const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
+    expect(getResponse.statusCode).toBe(404);
+  });
+
+  it("cancels and deletes a queued task", async () => {
+    const app = buildApp(undefined, neverQuery);
+
+    const projectResponse = await app.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { source: "path", value: repoDir },
+    });
+    const project = projectResponse.json();
+
+    await app.inject({
+      method: "POST",
+      url: `/settings`,
+      payload: { maxConcurrentAgents: 1 },
+    });
+
+    await app.inject({
+      method: "POST",
+      url: `/projects/${project.id}/tasks`,
+      payload: { description: "first task", mode: "sdk" },
+    });
+
+    const taskResponse = await app.inject({
+      method: "POST",
+      url: `/projects/${project.id}/tasks`,
+      payload: { description: "second task", mode: "sdk" },
+    });
+    const task = taskResponse.json();
+    expect(task.status).toBe("queued");
+
+    const deleteResponse = await app.inject({ method: "DELETE", url: `/tasks/${task.id}` });
+    expect(deleteResponse.statusCode).toBe(200);
+
+    const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
+    expect(getResponse.statusCode).toBe(404);
+  });
+
+  it("rejects deleting an already-deleted task", async () => {
+    const app = buildApp();
+
+    const deleteResponse = await app.inject({ method: "DELETE", url: `/tasks/no-such-task` });
+    expect(deleteResponse.statusCode).toBe(404);
   });
 
   it("rejects worktree removal for a running task", async () => {

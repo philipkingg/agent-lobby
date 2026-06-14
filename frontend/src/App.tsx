@@ -243,6 +243,7 @@ function App() {
               <button className="task-link" onClick={() => setSelectedTaskId(t.id)}>
                 <strong>[{t.status}]</strong> {t.description} ({t.mode}, {t.branchName})
               </button>
+              <button onClick={() => clearTask(t.id)}>Clear</button>
             </li>
           ))}
         </ul>
