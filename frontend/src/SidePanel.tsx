@@ -153,15 +153,27 @@ function SidePanel({
     setReply('')
   }
 
+  const pillVariant: Record<string, string> = {
+    draft: 'pill-idle',
+    queued: 'pill-idle',
+    running: 'pill-active',
+    blocked: 'pill-active',
+    done: 'pill-success',
+    closed: 'pill-success',
+    stopped: 'pill-idle',
+    error: 'pill-error',
+    failed: 'pill-error',
+  }
+
   return (
     <div className="side-panel">
-      <button className="side-panel-close" onClick={onClose}>
-        close
-      </button>
-      <h3>{task.description}</h3>
-      <p>
-        status: <strong>{status}</strong>
-      </p>
+      <div className="side-panel-header">
+        <h3>{task.description || '(no description)'}</h3>
+        <button className="side-panel-close" onClick={onClose}>
+          close
+        </button>
+      </div>
+      <span className={`pill ${pillVariant[status] ?? 'pill-idle'}`}>{status}</span>
 
       <div className="side-panel-actions">
         {(status === 'running' || status === 'blocked' || status === 'queued') && (
@@ -170,7 +182,11 @@ function SidePanel({
           </button>
         )}
 
-        {status === 'draft' && <button onClick={() => onStart(task.id)}>Start</button>}
+        {status === 'draft' && (
+          <button className="btn-primary" onClick={() => onStart(task.id)}>
+            Start
+          </button>
+        )}
 
         {status === 'done' && (
           <>
@@ -184,7 +200,9 @@ function SidePanel({
                 {task.prError} <button onClick={() => onRetryPr(task.id)}>Retry PR</button>
               </span>
             )}
-            <button onClick={() => onCloseTicket(task.id)}>Move to Done</button>
+            <button className="btn-primary" onClick={() => onCloseTicket(task.id)}>
+              Move to Done
+            </button>
           </>
         )}
 
@@ -200,7 +218,9 @@ function SidePanel({
           ))}
 
         {(status === 'done' || status === 'failed' || status === 'closed' || status === 'stopped') && (
-          <button onClick={() => onClear(task.id)}>Clear</button>
+          <button className="btn-danger" onClick={() => onClear(task.id)}>
+            Clear
+          </button>
         )}
       </div>
 

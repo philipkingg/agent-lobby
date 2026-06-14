@@ -40,7 +40,9 @@ function SettingsMenu({
 
       <section className="settings-section">
         <h3>Backend</h3>
-        <p>Backend status: {status}</p>
+        <p>
+          status: <code>{status}</code>
+        </p>
       </section>
 
       <section className="settings-section">
@@ -84,9 +86,10 @@ function SettingsMenu({
           <ul>
             {projects.map((p) => (
               <li key={p.id}>
-                <strong>{p.name}</strong> — {p.path} (default branch: {p.defaultBranch})
-                {' '}
-                <button type="button" onClick={() => onRemoveProject(p.id)}>
+                <span>
+                  <strong>{p.name}</strong> — {p.path} <code>{p.defaultBranch}</code>
+                </span>
+                <button type="button" className="btn-danger" onClick={() => onRemoveProject(p.id)}>
                   Remove
                 </button>
               </li>

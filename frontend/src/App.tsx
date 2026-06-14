@@ -39,6 +39,7 @@ function App() {
   const [error, setError] = useState<string | null>(null)
 
   const [taskProjectId, setTaskProjectId] = useState('')
+  const [taskTitle, setTaskTitle] = useState('')
   const [taskDescription, setTaskDescription] = useState('')
   const [taskMode, setTaskMode] = useState<'sdk' | 'pty'>('sdk')
   const [taskError, setTaskError] = useState<string | null>(null)
@@ -136,10 +137,17 @@ function App() {
       return
     }
 
+    if (!taskTitle.trim()) {
+      setTaskError('give the ticket a title')
+      return
+    }
+
+    const description = taskDescription.trim() ? `${taskTitle}\n\n${taskDescription}` : taskTitle
+
     const res = await fetch(`/api/projects/${taskProjectId}/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ description: taskDescription, mode: taskMode, draft: true }),
+      body: JSON.stringify({ description, mode: taskMode, draft: true }),
     })
 
     if (!res.ok) {
@@ -148,6 +156,7 @@ function App() {
       return
     }
 
+    setTaskTitle('')
     setTaskDescription('')
     loadTasks()
   }
@@ -187,67 +196,99 @@ function App() {
     <div className="app">
       <div className="app-header">
         <h1>Agent Office</h1>
-        <button type="button" className="settings-toggle" onClick={() => setSettingsOpen((open) => !open)}>
-          {settingsOpen ? 'Close Settings' : 'Settings'}
-        </button>
+        <div className="app-header-meta">
+          <span className={`pill ${status === 'ok' ? 'pill-success' : 'pill-error'}`}>{status}</span>
+          <button type="button" className="settings-toggle" onClick={() => setSettingsOpen((open) => !open)}>
+            {settingsOpen ? 'Close Settings' : 'Settings'}
+          </button>
+        </div>
       </div>
 
       {settingsOpen && (
-        <SettingsMenu
-          status={status}
-          maxConcurrentAgents={maxConcurrentAgents}
-          onUpdateMaxConcurrentAgents={updateMaxConcurrentAgents}
-          projects={projects}
-          projectSource={projectSource}
-          onProjectSourceChange={setProjectSource}
-          pathInput={pathInput}
-          onPathInputChange={setPathInput}
-          onAddProject={addProject}
-          onRemoveProject={removeProject}
-          error={error}
-        />
+        <div className="panel">
+          <SettingsMenu
+            status={status}
+            maxConcurrentAgents={maxConcurrentAgents}
+            onUpdateMaxConcurrentAgents={updateMaxConcurrentAgents}
+            projects={projects}
+            projectSource={projectSource}
+            onProjectSourceChange={setProjectSource}
+            pathInput={pathInput}
+            onPathInputChange={setPathInput}
+            onAddProject={addProject}
+            onRemoveProject={removeProject}
+            error={error}
+          />
+        </div>
       )}
 
-      <h2>Office</h2>
-      <OfficeCanvas tasks={tasks ?? []} onSelect={setSelectedTaskId} />
+      <section className="section">
+        <div className="office-canvas">
+          <OfficeCanvas tasks={tasks ?? []} onSelect={setSelectedTaskId} />
+        </div>
+      </section>
 
-      <h2>Board</h2>
-      <form onSubmit={addTask}>
-        <select value={taskProjectId} onChange={(e) => setTaskProjectId(e.target.value)}>
-          {(projects ?? []).map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-        <input
-          type="text"
-          placeholder="describe the task"
-          value={taskDescription}
-          onChange={(e) => setTaskDescription(e.target.value)}
-        />
-        <select value={taskMode} onChange={(e) => setTaskMode(e.target.value as 'sdk' | 'pty')}>
-          <option value="sdk">sdk</option>
-          <option value="pty">pty</option>
-        </select>
-        <button type="submit">New Ticket</button>
-      </form>
-      {taskError && <p className="error">{taskError}</p>}
+      <section className="section">
+        <div className="panel new-ticket-panel">
+          <h3>New Ticket</h3>
+          <form className="ticket-form" onSubmit={addTask}>
+            <div className="ticket-form-row">
+              <select value={taskProjectId} onChange={(e) => setTaskProjectId(e.target.value)}>
+                {(projects ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              <select value={taskMode} onChange={(e) => setTaskMode(e.target.value as 'sdk' | 'pty')}>
+                <option value="sdk">sdk</option>
+                <option value="pty">pty</option>
+              </select>
+            </div>
+            <label className="ticket-form-label" htmlFor="ticket-title">
+              Title
+            </label>
+            <input
+              id="ticket-title"
+              type="text"
+              className="ticket-title-input"
+              placeholder="What needs doing?"
+              value={taskTitle}
+              onChange={(e) => setTaskTitle(e.target.value)}
+            />
+            <label className="ticket-form-label" htmlFor="ticket-description">
+              Description
+            </label>
+            <textarea
+              id="ticket-description"
+              className="ticket-description-input"
+              placeholder="Add context, acceptance criteria, links — anything the agent should know."
+              value={taskDescription}
+              onChange={(e) => setTaskDescription(e.target.value)}
+              rows={4}
+            />
+            {taskError && <p className="error">{taskError}</p>}
+            <button type="submit" className="btn-primary">
+              New Ticket
+            </button>
+          </form>
+        </div>
 
-      {tasks === null ? (
-        <p>Loading tasks…</p>
-      ) : (
-        <KanbanBoard
-          tasks={tasks}
-          onSelect={setSelectedTaskId}
-          onStart={startTicket}
-          onClose={closeTicket}
-          onRetryPr={retryPr}
-          onRetryTask={retryTask}
-          onRemoveWorktree={removeWorktree}
-          onClear={clearTask}
-        />
-      )}
+        {tasks === null ? (
+          <p>Loading tasks…</p>
+        ) : (
+          <KanbanBoard
+            tasks={tasks}
+            onSelect={setSelectedTaskId}
+            onStart={startTicket}
+            onClose={closeTicket}
+            onRetryPr={retryPr}
+            onRetryTask={retryTask}
+            onRemoveWorktree={removeWorktree}
+            onClear={clearTask}
+          />
+        )}
+      </section>
 
       {selectedTaskId && (
         <SidePanel

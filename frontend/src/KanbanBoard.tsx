@@ -46,6 +46,18 @@ function columnForStatus(status: string): string | undefined {
   return COLUMNS.find((c) => c.statuses.includes(status))?.key
 }
 
+const STATUS_PILL: Record<string, string> = {
+  draft: 'pill-idle',
+  queued: 'pill-idle',
+  running: 'pill-active',
+  blocked: 'pill-active',
+  done: 'pill-success',
+  closed: 'pill-success',
+  stopped: 'pill-idle',
+  error: 'pill-error',
+  failed: 'pill-error',
+}
+
 interface KanbanBoardProps {
   tasks: Task[]
   onSelect: (taskId: string) => void
@@ -83,9 +95,12 @@ function TicketCard({ task, ...actions }: { task: Task } & Omit<KanbanBoardProps
         {task.mode}
         {task.branchName && ` · ${task.branchName}`}
       </div>
+      <span className={`pill ${STATUS_PILL[task.status] ?? 'pill-idle'}`}>{task.status}</span>
 
       {task.status === 'draft' && (
-        <button onClick={stop(() => actions.onStart(task.id))}>Start</button>
+        <button className="btn-primary" onClick={stop(() => actions.onStart(task.id))}>
+          Start
+        </button>
       )}
 
       {task.status === 'blocked' && task.pendingQuestion && (
@@ -113,19 +128,24 @@ function TicketCard({ task, ...actions }: { task: Task } & Omit<KanbanBoardProps
               {task.prError} <button onClick={stop(() => actions.onRetryPr(task.id))}>Retry PR</button>
             </span>
           )}
-          <button onClick={stop(() => actions.onClose(task.id))}>Move to Done</button>
+          <button className="btn-primary" onClick={stop(() => actions.onClose(task.id))}>
+            Move to Done
+          </button>
         </>
       )}
     </div>
   )
 }
 
-function ColumnDropArea({ column, children }: { column: Column; children: React.ReactNode }) {
+function ColumnDropArea({ column, count, children }: { column: Column; count: number; children: React.ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({ id: column.key })
 
   return (
     <div ref={setNodeRef} className={`kanban-column${isOver ? ' over' : ''}`}>
-      <h3>{column.title}</h3>
+      <h3>
+        {column.title}
+        <span className="kanban-column-count">{count}</span>
+      </h3>
       <div className="kanban-cards">{children}</div>
     </div>
   )
@@ -178,15 +198,16 @@ function KanbanBoard({ tasks, ...actions }: KanbanBoardProps) {
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="kanban-board">
-        {COLUMNS.map((column) => (
-          <ColumnDropArea key={column.key} column={column}>
-            {tasks
-              .filter((t) => column.statuses.includes(t.status))
-              .map((task) => (
+        {COLUMNS.map((column) => {
+          const columnTasks = tasks.filter((t) => column.statuses.includes(t.status))
+          return (
+            <ColumnDropArea key={column.key} column={column} count={columnTasks.length}>
+              {columnTasks.map((task) => (
                 <TicketCard key={task.id} task={task} {...actions} />
               ))}
-          </ColumnDropArea>
-        ))}
+            </ColumnDropArea>
+          )
+        })}
       </div>
       {isDragging && <DeleteDropArea />}
     </DndContext>
