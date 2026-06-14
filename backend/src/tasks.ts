@@ -31,14 +31,57 @@ export interface CreateTaskInput {
   mode: TaskMode;
 }
 
-export function createTask(db: DatabaseSync, project: Project, input: CreateTaskInput): Task {
+/**
+ * Picks a desk for a newly-dispatched task. If `preferredDeskIndex` names an
+ * idle worker (no task, or one parked "done" in code review), assign it
+ * there - freeing the "done" task's desk if needed. Otherwise falls back to
+ * the default allocation (reuse the oldest idle "done" desk, else first free).
+ */
+function resolveDeskIndex(db: DatabaseSync, preferredDeskIndex: number | null | undefined, now: string): number | null {
+  const occupied = (
+    db.prepare(`SELECT id, deskIndex, status FROM tasks WHERE deskIndex IS NOT NULL`).all() as {
+      id: string;
+      deskIndex: number;
+      status: TaskStatus;
+    }[]
+  ).filter((row) => row.status !== "done");
+
+  if (preferredDeskIndex !== undefined && preferredDeskIndex !== null) {
+    const blocker = occupied.find((row) => row.deskIndex === preferredDeskIndex);
+    if (!blocker) {
+      // Free the desk if a "done" task is parked there - it's moving on.
+      db.prepare(`UPDATE tasks SET deskIndex = NULL, updatedAt = ? WHERE deskIndex = ? AND status = 'done'`).run(
+        now,
+        preferredDeskIndex
+      );
+      return preferredDeskIndex;
+    }
+  }
+
+  const idleAgent = db
+    .prepare(`SELECT id, deskIndex FROM tasks WHERE status = 'done' AND deskIndex IS NOT NULL ORDER BY updatedAt ASC LIMIT 1`)
+    .get() as { id: string; deskIndex: number } | undefined;
+
+  if (idleAgent) {
+    db.prepare(`UPDATE tasks SET deskIndex = NULL, updatedAt = ? WHERE id = ?`).run(now, idleAgent.id);
+    return idleAgent.deskIndex;
+  }
+
+  const taken = occupied.map((row) => row.deskIndex);
+  return allocateDeskIndex(taken);
+}
+
+export function createTask(
+  db: DatabaseSync,
+  project: Project,
+  input: CreateTaskInput,
+  preferredDeskIndex?: number | null
+): Task {
   const id = randomUUID();
   const path = createWorktree(project, id, input.description);
   const now = new Date().toISOString();
 
-  const taken = (db.prepare(`SELECT deskIndex FROM tasks`).all() as { deskIndex: number | null }[]).map(
-    (row) => row.deskIndex
-  );
+  const deskIndex = resolveDeskIndex(db, preferredDeskIndex, now);
 
   const task: Task = {
     id,
@@ -53,7 +96,7 @@ export function createTask(db: DatabaseSync, project: Project, input: CreateTask
     prError: null,
     error: null,
     worktreeRemoved: 0,
-    deskIndex: allocateDeskIndex(taken),
+    deskIndex,
     pendingQuestion: null,
     createdAt: now,
     updatedAt: now,
@@ -134,29 +177,16 @@ export function createDraftTask(db: DatabaseSync, project: Project, input: Creat
 }
 
 /** Moves a draft ticket into the "Todo" column: creates its worktree/branch and allocates a desk. */
-export function startTask(db: DatabaseSync, project: Project, task: Task): Task {
+export function startTask(db: DatabaseSync, project: Project, task: Task, preferredDeskIndex?: number | null): Task {
   const path = createWorktree(project, task.id, task.description);
   const branch = branchName(task.id, task.description);
   const now = new Date().toISOString();
 
-  // Prefer reusing the desk of an idle agent (a "done" task waiting in code
-  // review) over allocating a fresh one, so finished agents pick up new
-  // tickets instead of every ticket spawning its own agent/desk.
-  const idleAgent = db
-    .prepare(`SELECT id, deskIndex FROM tasks WHERE status = 'done' AND deskIndex IS NOT NULL ORDER BY updatedAt ASC LIMIT 1`)
-    .get() as { id: string; deskIndex: number } | undefined;
-
-  let deskIndex: number | null;
-  if (idleAgent) {
-    deskIndex = idleAgent.deskIndex;
-    // Free the idle agent's desk - it's moving on to this new ticket.
-    db.prepare(`UPDATE tasks SET deskIndex = NULL, updatedAt = ? WHERE id = ?`).run(now, idleAgent.id);
-  } else {
-    const taken = (db.prepare(`SELECT deskIndex FROM tasks`).all() as { deskIndex: number | null }[]).map(
-      (row) => row.deskIndex
-    );
-    deskIndex = allocateDeskIndex(taken);
-  }
+  // Prefer assigning to a requested worker's desk; otherwise prefer reusing
+  // the desk of an idle agent (a "done" task waiting in code review) over
+  // allocating a fresh one, so finished agents pick up new tickets instead
+  // of every ticket spawning its own agent/desk.
+  const deskIndex = resolveDeskIndex(db, preferredDeskIndex, now);
 
   db.prepare(`UPDATE tasks SET branchName = ?, worktreePath = ?, deskIndex = ?, status = 'queued', updatedAt = ? WHERE id = ?`).run(
     branch,

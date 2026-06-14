@@ -36,6 +36,13 @@ export function createDb(path: string = ":memory:"): DatabaseSync {
   `);
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS workers (
+      deskIndex INTEGER PRIMARY KEY,
+      name TEXT NOT NULL
+    )
+  `);
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY,
       projectId TEXT NOT NULL REFERENCES projects(id),

@@ -15,9 +15,16 @@ interface Task {
   deskIndex: number | null
 }
 
+interface Worker {
+  deskIndex: number
+  name: string
+}
+
 interface OfficeCanvasProps {
   tasks: Task[]
+  workers: Worker[]
   onSelect: (taskId: string) => void
+  onSelectWorker: (deskIndex: number) => void
 }
 
 const FLOOR_BG = 0x100d0a
@@ -58,6 +65,11 @@ function drawFloor(g: PixiGraphics, width: number, height: number) {
 function drawAccentMark(g: PixiGraphics, accentColor: number) {
   g.clear()
   g.rect(0, 0, 8, 8).fill(accentColor)
+}
+
+function drawAgent(g: PixiGraphics, color: number) {
+  g.clear()
+  g.circle(0, 0, DESK_SIZE / 5).fill(color)
 }
 
 function drawBadge(g: PixiGraphics, color: number) {
@@ -104,7 +116,7 @@ function PixelSprite({
   return <pixiSprite texture={texture} x={x} y={y} scale={scale} alpha={alpha} />
 }
 
-function OfficeCanvas({ tasks, onSelect }: OfficeCanvasProps) {
+function OfficeCanvas({ tasks, workers, onSelect, onSelectWorker }: OfficeCanvasProps) {
   const { width, height } = officeSize()
   const [textures, setTextures] = useState<Record<SpriteName, Texture> | null>(null)
 
@@ -129,6 +141,11 @@ function OfficeCanvas({ tasks, onSelect }: OfficeCanvasProps) {
     if (task.deskIndex !== null) byDesk.set(task.deskIndex, task)
   }
 
+  const workerByDesk = new Map<number, Worker>()
+  for (const worker of workers) {
+    workerByDesk.set(worker.deskIndex, worker)
+  }
+
   const officeWidth = width + 64
   const officeHeight = height + 32
 
@@ -149,18 +166,26 @@ function OfficeCanvas({ tasks, onSelect }: OfficeCanvasProps) {
       {Array.from({ length: MAX_DESKS }, (_, index) => {
         const pos = deskPosition(index)
         const task = byDesk.get(index)
+        const worker = workerByDesk.get(index)
         const visual = task ? agentVisual(task.status) : null
         const accentColor = task ? projectColor(task.projectId) : 0x4a3f33
         const deskSprite = textures ? (index % 2 === 0 ? textures.deskA : textures.deskB) : null
+        // Idle worker desks (within the concurrency limit, no task assigned)
+        // are still clickable so a ticket can be assigned to them directly.
+        const clickable = task ? true : !!worker
+        const handleClick = () => {
+          if (task) onSelect(task.id)
+          else if (worker) onSelectWorker(worker.deskIndex)
+        }
 
         return (
           <pixiContainer
             key={index}
             x={pos.x}
             y={pos.y}
-            eventMode={task ? 'static' : 'none'}
-            cursor={task ? 'pointer' : 'default'}
-            onClick={() => task && onSelect(task.id)}
+            eventMode={clickable ? 'static' : 'none'}
+            cursor={clickable ? 'pointer' : 'default'}
+            onClick={handleClick}
           >
             {deskSprite ? (
               <PixelSprite texture={deskSprite} x={0} y={0} />
@@ -172,12 +197,26 @@ function OfficeCanvas({ tasks, onSelect }: OfficeCanvasProps) {
                 <AnimatedAgent texture={textures.agent} color={visual.color} animation={visual.animation} />
               </pixiContainer>
             )}
+            {!visual && worker && (
+              <pixiContainer x={DESK_SIZE * 0.72} y={DESK_SIZE * 0.32}>
+                <pixiGraphics draw={(g) => drawAgent(g, 0x6d5d4e)} />
+              </pixiContainer>
+            )}
             <pixiGraphics x={2} y={2} draw={(g) => drawAccentMark(g, accentColor)} />
             {visual?.badge && (
               <pixiGraphics
                 x={DESK_SIZE - 4}
                 y={4}
                 draw={(g) => drawBadge(g, BADGE_COLORS[visual.badge!])}
+              />
+            )}
+            {worker && (
+              <pixiText
+                text={worker.name}
+                x={DESK_SIZE / 2}
+                y={-14}
+                anchor={0.5}
+                style={{ fontFamily: 'monospace', fontSize: 11, fill: task ? 0xffffff : 0xb0a08c, align: 'center' }}
               />
             )}
           </pixiContainer>
