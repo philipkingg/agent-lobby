@@ -137,12 +137,26 @@ export function createDraftTask(db: DatabaseSync, project: Project, input: Creat
 export function startTask(db: DatabaseSync, project: Project, task: Task): Task {
   const path = createWorktree(project, task.id, task.description);
   const branch = branchName(task.id, task.description);
-
-  const taken = (db.prepare(`SELECT deskIndex FROM tasks`).all() as { deskIndex: number | null }[]).map(
-    (row) => row.deskIndex
-  );
-  const deskIndex = allocateDeskIndex(taken);
   const now = new Date().toISOString();
+
+  // Prefer reusing the desk of an idle agent (a "done" task waiting in code
+  // review) over allocating a fresh one, so finished agents pick up new
+  // tickets instead of every ticket spawning its own agent/desk.
+  const idleAgent = db
+    .prepare(`SELECT id, deskIndex FROM tasks WHERE status = 'done' AND deskIndex IS NOT NULL ORDER BY updatedAt ASC LIMIT 1`)
+    .get() as { id: string; deskIndex: number } | undefined;
+
+  let deskIndex: number | null;
+  if (idleAgent) {
+    deskIndex = idleAgent.deskIndex;
+    // Free the idle agent's desk - it's moving on to this new ticket.
+    db.prepare(`UPDATE tasks SET deskIndex = NULL, updatedAt = ? WHERE id = ?`).run(now, idleAgent.id);
+  } else {
+    const taken = (db.prepare(`SELECT deskIndex FROM tasks`).all() as { deskIndex: number | null }[]).map(
+      (row) => row.deskIndex
+    );
+    deskIndex = allocateDeskIndex(taken);
+  }
 
   db.prepare(`UPDATE tasks SET branchName = ?, worktreePath = ?, deskIndex = ?, status = 'queued', updatedAt = ? WHERE id = ?`).run(
     branch,
