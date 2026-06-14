@@ -3,6 +3,7 @@ import './App.css'
 import SidePanel from './SidePanel'
 import OfficeCanvas from './OfficeCanvas'
 import KanbanBoard from './KanbanBoard'
+import SettingsMenu from './SettingsMenu'
 
 interface Project {
   id: string
@@ -43,6 +44,7 @@ function App() {
   const [taskError, setTaskError] = useState<string | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [maxConcurrentAgents, setMaxConcurrentAgents] = useState<number | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const loadProjects = () => {
     fetch('/api/projects')
@@ -183,54 +185,27 @@ function App() {
 
   return (
     <div className="app">
-      <h1>Agent Office</h1>
-      <p>Backend status: {status}</p>
+      <div className="app-header">
+        <h1>Agent Office</h1>
+        <button type="button" className="settings-toggle" onClick={() => setSettingsOpen((open) => !open)}>
+          {settingsOpen ? 'Close Settings' : 'Settings'}
+        </button>
+      </div>
 
-      {maxConcurrentAgents !== null && (
-        <p>
-          Max concurrent agents:{' '}
-          <input
-            type="number"
-            min={1}
-            max={10}
-            value={maxConcurrentAgents}
-            onChange={(e) => updateMaxConcurrentAgents(Number(e.target.value))}
-          />
-        </p>
-      )}
-
-      <h2>Projects</h2>
-      <form onSubmit={addProject}>
-        <select value={projectSource} onChange={(e) => setProjectSource(e.target.value as 'path' | 'url')}>
-          <option value="path">local path</option>
-          <option value="url">git URL</option>
-        </select>
-        <input
-          type="text"
-          placeholder={projectSource === 'path' ? '/path/to/local/repo' : 'https://github.com/org/repo.git'}
-          value={pathInput}
-          onChange={(e) => setPathInput(e.target.value)}
+      {settingsOpen && (
+        <SettingsMenu
+          status={status}
+          maxConcurrentAgents={maxConcurrentAgents}
+          onUpdateMaxConcurrentAgents={updateMaxConcurrentAgents}
+          projects={projects}
+          projectSource={projectSource}
+          onProjectSourceChange={setProjectSource}
+          pathInput={pathInput}
+          onPathInputChange={setPathInput}
+          onAddProject={addProject}
+          onRemoveProject={removeProject}
+          error={error}
         />
-        <button type="submit">Add Project</button>
-      </form>
-      {error && <p className="error">{error}</p>}
-
-      {projects === null ? (
-        <p>Loading projects…</p>
-      ) : projects.length === 0 ? (
-        <p>No projects yet — add one above to get started.</p>
-      ) : (
-        <ul>
-          {projects.map((p) => (
-            <li key={p.id}>
-              <strong>{p.name}</strong> — {p.path} (default branch: {p.defaultBranch})
-              {' '}
-              <button type="button" onClick={() => removeProject(p.id)}>
-                Remove
-              </button>
-            </li>
-          ))}
-        </ul>
       )}
 
       <h2>Office</h2>
