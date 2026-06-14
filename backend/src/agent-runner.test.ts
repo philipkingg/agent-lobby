@@ -194,6 +194,82 @@ describe("AgentRunner.run", () => {
     expect(getTask(db, task.id)!.status).toBe("done");
   });
 
+  it("stop() returns false when the task has no active run", () => {
+    const db = createDb();
+    const runner = new AgentRunner(db, () => {});
+    expect(runner.stop("no-such-task")).toBe(false);
+  });
+
+  it("stop() aborts a running query and marks the task stopped", async () => {
+    const db = createDb();
+    const task = makeTask(db);
+    const events: AgentEvent[] = [];
+
+    const fakeQuery: QueryFn = async function* (params) {
+      const signal = params.options?.abortController?.signal;
+      yield {
+        type: "assistant",
+        uuid: "u1",
+        session_id: "sess-1",
+        message: { content: [{ type: "text", text: "working" }] },
+        parent_tool_use_id: null,
+      } as never;
+
+      await new Promise<void>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new Error("aborted")));
+      });
+    };
+
+    const runner = new AgentRunner(db, (taskId, event) => events.push(event), fakeQuery);
+    const runPromise = runner.run(task, project);
+
+    // Wait until the runner has registered the abort controller.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(runner.stop(task.id)).toBe(true);
+    await runPromise;
+
+    expect(getTask(db, task.id)!.status).toBe("stopped");
+    expect(events.filter((e) => e.type === "status")).toEqual([{ type: "status", status: "stopped" }]);
+
+    // Calling stop() again has nothing to cancel.
+    expect(runner.stop(task.id)).toBe(false);
+  });
+
+  it("stop() unblocks a task waiting on AskUser and marks it stopped", async () => {
+    const db = createDb();
+    const task = makeTask(db);
+    const events: AgentEvent[] = [];
+
+    const fakeQuery: QueryFn = async function* (params) {
+      const signal = params.options?.abortController?.signal;
+      yield {
+        type: "assistant",
+        uuid: "u1",
+        session_id: "sess-1",
+        message: {
+          content: [{ type: "tool_use", id: "t1", name: "AskUser", input: { question: "which branch?" } }],
+        },
+        parent_tool_use_id: null,
+      } as never;
+
+      await new Promise<void>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new Error("aborted")));
+      });
+    };
+
+    const runner = new AgentRunner(db, (taskId, event) => events.push(event), fakeQuery);
+    const runPromise = runner.run(task, project);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(getTask(db, task.id)!.status).toBe("blocked");
+
+    expect(runner.stop(task.id)).toBe(true);
+    await runPromise;
+
+    expect(getTask(db, task.id)!.status).toBe("stopped");
+  });
+
   it("marks a resumed task as failed (with error detail) if the resume throws", async () => {
     const db = createDb();
     const task = makeTask(db, { sessionId: "sess-123" });

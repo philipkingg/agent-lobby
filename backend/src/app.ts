@@ -68,6 +68,24 @@ export function buildApp(
 
   const taskManager = new TaskManager(db, dispatchTask);
 
+  /**
+   * Cancels an in-flight task regardless of mode/status: queued tasks are
+   * marked "stopped" directly, sdk tasks are aborted via the AgentRunner,
+   * and pty tasks are killed via the PtyManager. Returns false if the task
+   * was already in a terminal state with nothing to cancel.
+   */
+  const cancelTask = (task: Task): boolean => {
+    if (TERMINAL_STATUSES.includes(task.status)) return false;
+
+    if (task.status === "queued") {
+      setTaskStatus(db, task.id, "stopped");
+      broadcast(task.id, { type: "status", status: "stopped" });
+      return true;
+    }
+
+    return task.mode === "sdk" ? runner.stop(task.id) : ptyManager.stop(task.id);
+  };
+
   // Resume in-progress tasks left over from a previous run (e.g. server restart).
   const incomplete = listTasks(db).filter((t) => t.status === "running" || t.status === "blocked");
   for (const task of incomplete) {
@@ -254,8 +272,8 @@ export function buildApp(
       return reply.code(404).send({ error: "task not found" });
     }
 
-    if (!ptyManager.stop(id)) {
-      return reply.code(409).send({ error: "task has no running pty session" });
+    if (!cancelTask(task)) {
+      return reply.code(409).send({ error: "task has no active session to stop" });
     }
 
     return { ok: true };
@@ -295,9 +313,9 @@ export function buildApp(
     if (!task) {
       return reply.code(404).send({ error: "task not found" });
     }
-    if (!TERMINAL_STATUSES.includes(task.status)) {
-      return reply.code(409).send({ error: "task is still active" });
-    }
+
+    // Clearing an active task cancels it first, so any agent for it stops.
+    cancelTask(task);
 
     if (!task.worktreeRemoved) {
       const project = getProject(db, task.projectId);
