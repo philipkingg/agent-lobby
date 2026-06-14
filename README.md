@@ -86,3 +86,7 @@ others finish.
 cd backend && npm run build && npm test
 cd frontend && npm run build && npm test
 ```
+
+## License
+
+MIT
