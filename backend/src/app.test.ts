@@ -152,7 +152,7 @@ describe("/projects/:id/tasks", () => {
     expect(taskResponse.statusCode).toBe(201);
     const task = taskResponse.json();
     expect(task.status).toBe("running");
-    expect(task.branchName).toBe(`agent/${task.id}`);
+    expect(task.branchName).toBe(`agent/do-the-thing-${task.id.slice(0, 8)}`);
     expect(existsSync(task.worktreePath)).toBe(true);
 
     const listResponse = await app.inject({ method: "GET", url: "/tasks" });
@@ -235,7 +235,7 @@ describe("/projects/:id/tasks", () => {
 
     expect(body.status).toBe("done");
     expect(body.prUrl).toBe("https://github.com/acme/repo/pull/7");
-    expect(calls.map((c) => c.cmd)).toEqual(["git", "gh"]);
+    expect(calls.map((c) => c.cmd)).toEqual(["git", "git", "gh"]);
   });
 
   it("resumes a running sdk task with its sessionId on restart", async () => {
@@ -349,6 +349,61 @@ describe("/projects/:id/tasks", () => {
     expect(deleteResponse.statusCode).toBe(200);
     expect(deleteResponse.json().worktreeRemoved).toBe(1);
     expect(existsSync(task.worktreePath)).toBe(false);
+  });
+
+  it("deletes a completed task and its worktree via DELETE /tasks/:id", async () => {
+    const execFn: ExecFn = (cmd) => (cmd === "gh" ? "https://github.com/acme/repo/pull/7\n" : "");
+    const app = buildApp(undefined, successQuery, undefined, execFn);
+
+    const projectResponse = await app.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { source: "path", value: repoDir },
+    });
+    const project = projectResponse.json();
+
+    const taskResponse = await app.inject({
+      method: "POST",
+      url: `/projects/${project.id}/tasks`,
+      payload: { description: "do the thing", mode: "sdk" },
+    });
+    const task = taskResponse.json();
+
+    let body: { status: string } = { status: "running" };
+    for (let i = 0; i < 50 && body.status !== "done"; i++) {
+      const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
+      body = getResponse.json();
+      if (body.status !== "done") await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(body.status).toBe("done");
+
+    const deleteResponse = await app.inject({ method: "DELETE", url: `/tasks/${task.id}` });
+    expect(deleteResponse.statusCode).toBe(200);
+    expect(existsSync(task.worktreePath)).toBe(false);
+
+    const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
+    expect(getResponse.statusCode).toBe(404);
+  });
+
+  it("rejects deleting a running task", async () => {
+    const app = buildApp(undefined, neverQuery);
+
+    const projectResponse = await app.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { source: "path", value: repoDir },
+    });
+    const project = projectResponse.json();
+
+    const taskResponse = await app.inject({
+      method: "POST",
+      url: `/projects/${project.id}/tasks`,
+      payload: { description: "do the thing", mode: "sdk" },
+    });
+    const task = taskResponse.json();
+
+    const deleteResponse = await app.inject({ method: "DELETE", url: `/tasks/${task.id}` });
+    expect(deleteResponse.statusCode).toBe(409);
   });
 
   it("rejects worktree removal for a running task", async () => {

@@ -148,6 +148,12 @@ function App() {
     loadTasks()
   }
 
+  const clearTask = async (taskId: string) => {
+    await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' })
+    if (selectedTaskId === taskId) setSelectedTaskId(null)
+    loadTasks()
+  }
+
   const activeTasks = (tasks ?? []).filter((t) => t.status !== 'done' && t.status !== 'failed')
   const completedTasks = (tasks ?? []).filter((t) => t.status === 'done')
   const failedTasks = (tasks ?? []).filter((t) => t.status === 'failed')
@@ -271,6 +277,7 @@ function App() {
                 <button onClick={() => removeWorktree(t.id)}>Remove Worktree</button>
               </>
             )}
+            <button onClick={() => clearTask(t.id)}>Clear</button>
           </li>
         ))}
       </ul>
@@ -291,6 +298,7 @@ function App() {
             </p>
             <button onClick={() => retryTask(t.id)}>Start Fresh Task</button>
             {!t.worktreeRemoved && <button onClick={() => removeWorktree(t.id)}>Remove Worktree</button>}
+            <button onClick={() => clearTask(t.id)}>Clear</button>
           </li>
         ))}
       </ul>

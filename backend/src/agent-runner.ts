@@ -88,8 +88,12 @@ export class AgentRunner {
 
     const server = createSdkMcpServer({ name: "agent-office", tools: [askUserTool] });
 
+    const prompt = `${task.description}
+
+You are working on branch ${task.branchName}, which will be opened as a pull request when you finish. Make sure your work is actually committed: as you complete each piece of work, run \`git add\` and \`git commit\` with a clear, descriptive commit message explaining what changed and why. Do not finish with uncommitted changes — if \`git status\` shows anything pending, commit it before you stop.`;
+
     const stream = this.queryFn({
-      prompt: task.description,
+      prompt,
       options: {
         cwd: task.worktreePath,
         permissionMode: "bypassPermissions",

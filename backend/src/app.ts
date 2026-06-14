@@ -3,7 +3,7 @@ import websocketPlugin from "@fastify/websocket";
 import type { DatabaseSync } from "node:sqlite";
 import { createDb } from "./db.js";
 import { createProject, listProjects, getProject, InvalidProjectPathError, type GitExecFn } from "./projects.js";
-import { listTasks, getTask, setTaskStatus, setTaskPrResult, setTaskFailed, setTaskWorktreeRemoved, type Task, type TaskMode } from "./tasks.js";
+import { listTasks, getTask, setTaskStatus, setTaskPrResult, setTaskFailed, setTaskWorktreeRemoved, deleteTask, type Task, type TaskMode } from "./tasks.js";
 import { WorktreeError, removeWorktree } from "./worktrees.js";
 import { listTranscriptEntries } from "./transcripts.js";
 import { AgentRunner, type QueryFn } from "./agent-runner.js";
@@ -287,6 +287,31 @@ export function buildApp(
 
     setTaskWorktreeRemoved(db, id);
     return getTask(db, id);
+  });
+
+  app.delete("/tasks/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const task = getTask(db, id);
+    if (!task) {
+      return reply.code(404).send({ error: "task not found" });
+    }
+    if (!TERMINAL_STATUSES.includes(task.status)) {
+      return reply.code(409).send({ error: "task is still active" });
+    }
+
+    if (!task.worktreeRemoved) {
+      const project = getProject(db, task.projectId);
+      if (project) {
+        try {
+          removeWorktree(project, task.id);
+        } catch {
+          // worktree may already be gone - deleting the task record proceeds regardless.
+        }
+      }
+    }
+
+    deleteTask(db, id);
+    return { ok: true };
   });
 
   app.get("/settings", async () => {

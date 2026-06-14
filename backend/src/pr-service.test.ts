@@ -44,9 +44,31 @@ describe("createPullRequest", () => {
 
     expect(result).toEqual({ prUrl: "https://github.com/acme/repo/pull/42" });
     expect(calls[0]).toEqual({ cmd: "git", args: ["push", "-u", "origin", "agent/task-1"], cwd: task.worktreePath });
-    expect(calls[1].cmd).toBe("gh");
-    expect(calls[1].args).toContain("--base");
-    expect(calls[1].args).toContain("main");
+    const ghCall = calls.find((c) => c.cmd === "gh");
+    expect(ghCall?.args).toContain("--base");
+    expect(ghCall?.args).toContain("main");
+  });
+
+  it("includes the branch's commit log in the PR body", () => {
+    const execFn: ExecFn = (cmd, args) => {
+      if (cmd === "git" && args[0] === "log") return "- did the first thing\n- did the second thing";
+      if (cmd === "gh") return "https://github.com/acme/repo/pull/42\n";
+      return "";
+    };
+
+    const calls: { cmd: string; args: string[] }[] = [];
+    const recordingExecFn: ExecFn = (cmd, args, cwd) => {
+      calls.push({ cmd, args });
+      return execFn(cmd, args, cwd);
+    };
+
+    createPullRequest(task, project, recordingExecFn);
+
+    const ghCall = calls.find((c) => c.cmd === "gh")!;
+    const bodyIndex = ghCall.args.indexOf("--body");
+    expect(ghCall.args[bodyIndex + 1]).toBe(
+      "do the thing\n\n## Commits\n- did the first thing\n- did the second thing"
+    );
   });
 
   it("returns an error when git push fails", () => {

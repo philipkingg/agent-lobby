@@ -24,15 +24,32 @@ export function createPullRequest(task: Task, project: Project, execFn: ExecFn =
     return { error: `git push failed: ${errorMessage(err)}` };
   }
 
+  const body = buildPrBody(task, project, execFn);
+
   try {
     const out = execFn(
       "gh",
-      ["pr", "create", "--base", project.defaultBranch, "--head", task.branchName, "--title", task.description, "--body", task.description],
+      ["pr", "create", "--base", project.defaultBranch, "--head", task.branchName, "--title", task.description, "--body", body],
       task.worktreePath
     );
     const prUrl = out.trim().split("\n").pop() ?? "";
     return { prUrl };
   } catch (err) {
     return { error: `gh pr create failed: ${errorMessage(err)}` };
+  }
+}
+
+/** Builds a PR body from the task description plus the list of commits made on its branch. */
+function buildPrBody(task: Task, project: Project, execFn: ExecFn): string {
+  try {
+    const log = execFn(
+      "git",
+      ["log", `${project.defaultBranch}..${task.branchName}`, "--pretty=format:- %s"],
+      task.worktreePath
+    ).trim();
+
+    return log ? `${task.description}\n\n## Commits\n${log}` : task.description;
+  } catch {
+    return task.description;
   }
 }

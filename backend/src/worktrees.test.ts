@@ -65,4 +65,20 @@ describe("createWorktree / removeWorktree", () => {
   it("throws WorktreeError when removing a non-existent worktree", () => {
     expect(() => removeWorktree(project, "no-such-task")).toThrow(WorktreeError);
   });
+
+  it("derives a readable branch name from the task description", () => {
+    const taskId = "task-3";
+    const target = createWorktree(project, taskId, "Add login page with OAuth support!");
+
+    expect(target).toBe(worktreePath(project, taskId));
+    expect(branchName(taskId, "Add login page with OAuth support!")).toBe(
+      `agent/add-login-page-with-oauth-support-${taskId.slice(0, 8)}`
+    );
+
+    const branches = execFileSync("git", ["branch", "--list", branchName(taskId, "Add login page with OAuth support!")], {
+      cwd: repoDir,
+      encoding: "utf-8",
+    });
+    expect(branches).toContain("agent/add-login-page-with-oauth-support");
+  });
 });

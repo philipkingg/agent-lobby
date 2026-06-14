@@ -4,21 +4,30 @@ import type { Project } from "./projects.js";
 
 export class WorktreeError extends Error {}
 
-export function branchName(taskId: string): string {
-  return `agent/${taskId}`;
+/** Derives a readable branch name from the task description, falling back to a plain task-id slug. */
+export function branchName(taskId: string, description?: string): string {
+  const slug = (description ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/g, "");
+
+  const shortId = taskId.slice(0, 8);
+  return slug ? `agent/${slug}-${shortId}` : `agent/${taskId}`;
 }
 
 export function worktreePath(project: Project, taskId: string): string {
   return path.join(project.worktreesRoot, taskId);
 }
 
-export function createWorktree(project: Project, taskId: string): string {
+export function createWorktree(project: Project, taskId: string, description?: string): string {
   const target = worktreePath(project, taskId);
 
   try {
     execFileSync(
       "git",
-      ["worktree", "add", target, "-b", branchName(taskId), project.defaultBranch],
+      ["worktree", "add", target, "-b", branchName(taskId, description), project.defaultBranch],
       { cwd: project.path, encoding: "utf-8" }
     );
   } catch (err) {

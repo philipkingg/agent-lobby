@@ -33,7 +33,7 @@ export interface CreateTaskInput {
 
 export function createTask(db: DatabaseSync, project: Project, input: CreateTaskInput): Task {
   const id = randomUUID();
-  const path = createWorktree(project, id);
+  const path = createWorktree(project, id, input.description);
   const now = new Date().toISOString();
 
   const taken = (db.prepare(`SELECT deskIndex FROM tasks`).all() as { deskIndex: number | null }[]).map(
@@ -47,7 +47,7 @@ export function createTask(db: DatabaseSync, project: Project, input: CreateTask
     mode: input.mode,
     status: "running",
     sessionId: null,
-    branchName: branchName(id),
+    branchName: branchName(id, input.description),
     worktreePath: path,
     prUrl: null,
     prError: null,
@@ -82,6 +82,11 @@ export function createTask(db: DatabaseSync, project: Project, input: CreateTask
   );
 
   return task;
+}
+
+export function deleteTask(db: DatabaseSync, id: string): void {
+  db.prepare(`DELETE FROM transcript_entries WHERE taskId = ?`).run(id);
+  db.prepare(`DELETE FROM tasks WHERE id = ?`).run(id);
 }
 
 export function listTasks(db: DatabaseSync): Task[] {
