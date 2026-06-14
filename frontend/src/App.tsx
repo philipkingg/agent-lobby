@@ -279,6 +279,12 @@ function App() {
           task={(tasks ?? []).find((t) => t.id === selectedTaskId)!}
           onClose={() => setSelectedTaskId(null)}
           onTaskUpdate={loadTasks}
+          onStart={startTicket}
+          onCloseTicket={closeTicket}
+          onRetryPr={retryPr}
+          onRetryTask={retryTask}
+          onRemoveWorktree={removeWorktree}
+          onClear={clearTask}
         />
       )}
     </div>

@@ -1,4 +1,14 @@
-import { DndContext, useDraggable, useDroppable, type DragEndEvent } from '@dnd-kit/core'
+import {
+  DndContext,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  PointerSensor,
+  type DragEndEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core'
+import { useState } from 'react'
 
 interface Task {
   id: string
@@ -30,6 +40,8 @@ const COLUMNS: Column[] = [
   { key: 'done', title: 'Done', statuses: ['closed'] },
 ]
 
+const DELETE_ZONE_ID = 'delete-zone'
+
 function columnForStatus(status: string): string | undefined {
   return COLUMNS.find((c) => c.statuses.includes(status))?.key
 }
@@ -52,24 +64,28 @@ function TicketCard({ task, ...actions }: { task: Task } & Omit<KanbanBoardProps
     ? { transform: `translate(${transform.x}px, ${transform.y}px)`, zIndex: 10 }
     : undefined
 
+  const stop = (fn: () => void) => (e: React.MouseEvent) => {
+    e.stopPropagation()
+    fn()
+  }
+
   return (
     <div
       ref={setNodeRef}
       style={style}
       className={`kanban-card${isDragging ? ' dragging' : ''}`}
+      onClick={() => actions.onSelect(task.id)}
       {...listeners}
       {...attributes}
     >
-      <button className="task-link kanban-card-title" onClick={() => actions.onSelect(task.id)}>
-        {task.description}
-      </button>
+      <div className="kanban-card-title">{task.description || '(no description)'}</div>
       <div className="kanban-card-meta">
         {task.mode}
         {task.branchName && ` · ${task.branchName}`}
       </div>
 
       {task.status === 'draft' && (
-        <button onClick={() => actions.onStart(task.id)}>Start</button>
+        <button onClick={stop(() => actions.onStart(task.id))}>Start</button>
       )}
 
       {task.status === 'blocked' && task.pendingQuestion && (
@@ -79,36 +95,26 @@ function TicketCard({ task, ...actions }: { task: Task } & Omit<KanbanBoardProps
       {(task.status === 'error' || task.status === 'failed') && (
         <>
           <p className="error">{task.error ?? task.status}</p>
-          {task.status === 'failed' && <button onClick={() => actions.onRetryTask(task.id)}>Start Fresh Task</button>}
+          {task.status === 'failed' && (
+            <button onClick={stop(() => actions.onRetryTask(task.id))}>Start Fresh Task</button>
+          )}
         </>
       )}
 
       {task.status === 'done' && (
         <>
           {task.prUrl && (
-            <a href={task.prUrl} target="_blank" rel="noreferrer">
+            <a href={task.prUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
               {task.prUrl}
             </a>
           )}
           {task.prError && (
             <span className="error">
-              {task.prError} <button onClick={() => actions.onRetryPr(task.id)}>Retry PR</button>
+              {task.prError} <button onClick={stop(() => actions.onRetryPr(task.id))}>Retry PR</button>
             </span>
           )}
-          <button onClick={() => actions.onClose(task.id)}>Move to Done</button>
+          <button onClick={stop(() => actions.onClose(task.id))}>Move to Done</button>
         </>
-      )}
-
-      {task.status !== 'draft' && task.status !== 'queued' && task.branchName && (
-        task.worktreeRemoved ? (
-          <span className="kanban-card-meta">(worktree removed)</span>
-        ) : (
-          <button onClick={() => actions.onRemoveWorktree(task.id)}>Remove Worktree</button>
-        )
-      )}
-
-      {(task.status === 'done' || task.status === 'failed' || task.status === 'closed' || task.status === 'stopped') && (
-        <button onClick={() => actions.onClear(task.id)}>Clear</button>
       )}
     </div>
   )
@@ -125,13 +131,36 @@ function ColumnDropArea({ column, children }: { column: Column; children: React.
   )
 }
 
+function DeleteDropArea() {
+  const { setNodeRef, isOver } = useDroppable({ id: DELETE_ZONE_ID })
+
+  return (
+    <div ref={setNodeRef} className={`kanban-delete-zone${isOver ? ' over' : ''}`}>
+      Drop here to delete ticket
+    </div>
+  )
+}
+
 function KanbanBoard({ tasks, ...actions }: KanbanBoardProps) {
+  const [isDragging, setIsDragging] = useState(false)
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
+
+  const handleDragStart = (_event: DragStartEvent) => {
+    setIsDragging(true)
+  }
+
   const handleDragEnd = (event: DragEndEvent) => {
+    setIsDragging(false)
     const { active, over } = event
     if (!over) return
 
     const task = tasks.find((t) => t.id === active.id)
     if (!task) return
+
+    if (over.id === DELETE_ZONE_ID) {
+      actions.onClear(task.id)
+      return
+    }
 
     const from = columnForStatus(task.status)
     const to = over.id as string
@@ -147,7 +176,7 @@ function KanbanBoard({ tasks, ...actions }: KanbanBoardProps) {
   }
 
   return (
-    <DndContext onDragEnd={handleDragEnd}>
+    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="kanban-board">
         {COLUMNS.map((column) => (
           <ColumnDropArea key={column.key} column={column}>
@@ -159,6 +188,7 @@ function KanbanBoard({ tasks, ...actions }: KanbanBoardProps) {
           </ColumnDropArea>
         ))}
       </div>
+      {isDragging && <DeleteDropArea />}
     </DndContext>
   )
 }

@@ -15,6 +15,11 @@ interface Task {
   pendingQuestion: string | null
   description: string
   mode: 'sdk' | 'pty'
+  branchName: string
+  prUrl: string | null
+  prError: string | null
+  error: string | null
+  worktreeRemoved: number
 }
 
 type AgentEvent =
@@ -25,6 +30,12 @@ interface SidePanelProps {
   task: Task
   onClose: () => void
   onTaskUpdate: () => void
+  onStart: (taskId: string) => void
+  onCloseTicket: (taskId: string) => void
+  onRetryPr: (taskId: string) => void
+  onRetryTask: (taskId: string) => void
+  onRemoveWorktree: (taskId: string) => void
+  onClear: (taskId: string) => void
 }
 
 function summarize(entry: TranscriptEntry): string {
@@ -72,7 +83,17 @@ function simpleSummarize(entry: TranscriptEntry): string | null {
   }
 }
 
-function SidePanel({ task, onClose, onTaskUpdate }: SidePanelProps) {
+function SidePanel({
+  task,
+  onClose,
+  onTaskUpdate,
+  onStart,
+  onCloseTicket,
+  onRetryPr,
+  onRetryTask,
+  onRemoveWorktree,
+  onClear,
+}: SidePanelProps) {
   const [entries, setEntries] = useState<TranscriptEntry[]>([])
   const [status, setStatus] = useState(task.status)
   const [pendingQuestion, setPendingQuestion] = useState(task.pendingQuestion)
@@ -192,6 +213,41 @@ function SidePanel({ task, onClose, onTaskUpdate }: SidePanelProps) {
           <button type="submit">Send</button>
         </form>
       )}
+
+      <div className="side-panel-actions">
+        {status === 'draft' && <button onClick={() => onStart(task.id)}>Start</button>}
+
+        {status === 'done' && (
+          <>
+            {task.prUrl && (
+              <a href={task.prUrl} target="_blank" rel="noreferrer">
+                {task.prUrl}
+              </a>
+            )}
+            {task.prError && (
+              <span className="error">
+                {task.prError} <button onClick={() => onRetryPr(task.id)}>Retry PR</button>
+              </span>
+            )}
+            <button onClick={() => onCloseTicket(task.id)}>Move to Done</button>
+          </>
+        )}
+
+        {status === 'failed' && <button onClick={() => onRetryTask(task.id)}>Start Fresh Task</button>}
+
+        {status !== 'draft' &&
+          status !== 'queued' &&
+          task.branchName &&
+          (task.worktreeRemoved ? (
+            <span className="kanban-card-meta">(worktree removed)</span>
+          ) : (
+            <button onClick={() => onRemoveWorktree(task.id)}>Remove Worktree</button>
+          ))}
+
+        {(status === 'done' || status === 'failed' || status === 'closed' || status === 'stopped') && (
+          <button onClick={() => onClear(task.id)}>Clear</button>
+        )}
+      </div>
     </div>
   )
 }

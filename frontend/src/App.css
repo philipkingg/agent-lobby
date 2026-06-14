@@ -83,6 +83,26 @@
   font-size: 0.75rem;
 }
 
+.kanban-delete-zone {
+  position: fixed;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  background: #fdecea;
+  border: 2px dashed #c0392b;
+  color: #c0392b;
+  border-radius: 6px;
+  padding: 0.75rem 1.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.kanban-delete-zone.over {
+  background: #c0392b;
+  color: #fff;
+}
+
 .side-panel {
   position: fixed;
   top: 0;
@@ -155,4 +175,12 @@
 .stop-button {
   margin-top: 0.5rem;
   align-self: flex-start;
+}
+
+.side-panel-actions {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
 }
