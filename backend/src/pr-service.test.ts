@@ -71,6 +71,32 @@ describe("createPullRequest", () => {
     );
   });
 
+  it("enables auto-merge on the PR after creating it", () => {
+    const calls: { cmd: string; args: string[] }[] = [];
+    const execFn: ExecFn = (cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd === "gh" && args[0] === "pr" && args[1] === "create") return "https://github.com/acme/repo/pull/42\n";
+      return "";
+    };
+
+    const result = createPullRequest(task, project, execFn);
+
+    expect(result).toEqual({ prUrl: "https://github.com/acme/repo/pull/42" });
+    const mergeCall = calls.find((c) => c.cmd === "gh" && c.args[0] === "pr" && c.args[1] === "merge");
+    expect(mergeCall?.args).toEqual(["pr", "merge", "agent/task-1", "--auto", "--squash"]);
+  });
+
+  it("still returns the PR url if enabling auto-merge fails", () => {
+    const execFn: ExecFn = (cmd, args) => {
+      if (cmd === "gh" && args[0] === "pr" && args[1] === "create") return "https://github.com/acme/repo/pull/42\n";
+      if (cmd === "gh" && args[0] === "pr" && args[1] === "merge") throw new Error("auto-merge is not allowed");
+      return "";
+    };
+
+    const result = createPullRequest(task, project, execFn);
+    expect(result).toEqual({ prUrl: "https://github.com/acme/repo/pull/42" });
+  });
+
   it("returns an error when git push fails", () => {
     const execFn: ExecFn = () => {
       throw new Error("remote rejected");

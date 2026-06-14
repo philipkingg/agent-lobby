@@ -26,17 +26,26 @@ export function createPullRequest(task: Task, project: Project, execFn: ExecFn =
 
   const body = buildPrBody(task, project, execFn);
 
+  let prUrl: string;
   try {
     const out = execFn(
       "gh",
       ["pr", "create", "--base", project.defaultBranch, "--head", task.branchName, "--title", task.description, "--body", body],
       task.worktreePath
     );
-    const prUrl = out.trim().split("\n").pop() ?? "";
-    return { prUrl };
+    prUrl = out.trim().split("\n").pop() ?? "";
   } catch (err) {
     return { error: `gh pr create failed: ${errorMessage(err)}` };
   }
+
+  try {
+    execFn("gh", ["pr", "merge", task.branchName, "--auto", "--squash"], task.worktreePath);
+  } catch {
+    // Auto-merge couldn't be enabled (e.g. the repo doesn't allow it, or branch
+    // protection isn't configured) - the PR itself was still opened successfully.
+  }
+
+  return { prUrl };
 }
 
 /** Builds a PR body from the task description plus the list of commits made on its branch. */

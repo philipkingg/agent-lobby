@@ -235,7 +235,7 @@ describe("/projects/:id/tasks", () => {
 
     expect(body.status).toBe("done");
     expect(body.prUrl).toBe("https://github.com/acme/repo/pull/7");
-    expect(calls.map((c) => c.cmd)).toEqual(["git", "git", "gh"]);
+    expect(calls.map((c) => c.cmd)).toEqual(["git", "git", "gh", "gh"]);
   });
 
   it("resumes a running sdk task with its sessionId on restart", async () => {
