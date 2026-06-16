@@ -18,6 +18,7 @@ import {
   approveTaskStage,
   retryStuckTask,
   listTaskStages,
+  setTaskWorktree,
   type CreateTaskInput,
 } from "./tasks.js";
 import { hireAgent, fireAgent, listAgents, getAgent, type HireAgentInput } from "./agents.js";
@@ -31,19 +32,20 @@ import {
   removeAgentFromSquad,
 } from "./squads.js";
 import { listTranscriptEntries } from "./transcripts.js";
-import { removeWorktree, WorktreeError } from "./worktrees.js";
+import { createWorktree, branchName, removeWorktree, WorktreeError } from "./worktrees.js";
 import type { WsEvent } from "./ws-events.js";
 import { PipelineRunner } from "./pipeline-runner.js";
 import { AgentScheduler } from "./scheduler.js";
+import { CronService, pollPrComments, ingestGithubIssues } from "./cron-service.js";
 
 export type { GitExecFn };
 
 export function buildApp(
   db: DatabaseSync = createDb(),
   gitExecFn?: GitExecFn,
-  options: { autoStartScheduler?: boolean } = {}
+  options: { autoStartScheduler?: boolean; autoStartCron?: boolean } = {}
 ) {
-  const { autoStartScheduler = false } = options;
+  const { autoStartScheduler = false, autoStartCron = false } = options;
   const app = Fastify();
 
   // WebSocket subscriber map — channel key → set of sockets
@@ -58,6 +60,7 @@ export function buildApp(
 
   const pipelineRunner = new PipelineRunner(db, broadcast);
   const scheduler = new AgentScheduler(db, pipelineRunner, broadcast);
+  const cronService = new CronService(db, broadcast);
 
   app.register(websocketPlugin);
 
@@ -264,7 +267,16 @@ export function buildApp(
       githubIssueNumber: body.githubIssueNumber,
     });
 
-    return reply.code(201).send(task);
+    // Create a dedicated git worktree + branch for this task
+    try {
+      const wtPath = createWorktree(project, task.id, task.title);
+      const branch = branchName(task.id, task.title);
+      setTaskWorktree(db, task.id, wtPath, branch);
+      return reply.code(201).send(getTask(db, task.id));
+    } catch {
+      // Worktree creation failed (e.g. not a git repo in tests) — task still usable without it
+      return reply.code(201).send(task);
+    }
   });
 
   app.get("/tasks", async (request) => {
@@ -377,6 +389,18 @@ export function buildApp(
     return db.prepare(`SELECT * FROM user_profile WHERE id = 1`).get();
   });
 
+  // ── Cron endpoints ───────────────────────────────────────────────────────
+
+  app.post("/cron/poll-prs", async () => {
+    const result = await pollPrComments(db, broadcast);
+    return result;
+  });
+
+  app.post("/cron/ingest-issues", async () => {
+    const result = await ingestGithubIssues(db);
+    return result;
+  });
+
   // ── Scheduler control ─────────────────────────────────────────────────────
 
   app.post("/scheduler/start", async () => {
@@ -420,8 +444,12 @@ export function buildApp(
   });
 
   if (autoStartScheduler) scheduler.start();
+  if (autoStartCron) cronService.start();
 
-  app.addHook("onClose", async () => scheduler.stop());
+  app.addHook("onClose", async () => {
+    scheduler.stop();
+    cronService.stop();
+  });
 
   return app;
 }

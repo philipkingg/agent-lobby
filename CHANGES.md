@@ -4,6 +4,31 @@ This file tracks what has been built. Read it at the start of each new session f
 
 ---
 
+## Phase 3 — Git Workflow (Steps 10–13) [DONE]
+
+**Goal:** Worktrees per task, GitHub PR comment polling, issue ingestion.
+
+### What changed
+- `backend/src/app.ts` — `POST /tasks` now calls `createWorktree(project, task.id, task.title)` immediately after task creation, stores `worktreePath` + `branch` via `setTaskWorktree`. Fails silently if not a git repo (safe for tests). Added `POST /cron/poll-prs` and `POST /cron/ingest-issues` manual trigger endpoints. `CronService` wired into `buildApp`; `autoStartCron` option (default false). `onClose` hook stops cron.
+- `backend/src/cron-service.ts` — NEW. `pollPrComments(db, broadcast, execFn)`: lists open agent PRs via `gh pr list --search head:agent/`, matches to tasks by branch, creates Implementer tasks for unseen human comments (skips `github-actions[bot]`), tracks `pr_comment_seen:{prNumber}` in settings table. `ingestGithubIssues(db, execFn)`: lists open issues via `gh issue list`, maps `priority:*` labels to 1-5 scale, skips already-imported (by `githubIssueNumber`). `CronService` class wraps both with configurable `setInterval`.
+
+### Key decisions
+- Worktree creation is best-effort: silently skipped on failure (allows test repos without `origin`)
+- PR comment dedup: stores max seen comment ID per PR in `settings` table (`pr_comment_seen:{prNumber}`)
+- Issue dedup: `githubIssueNumber` column on tasks table
+- Priority label mapping: `priority:critical`=5, `priority:high`=4, `priority:low`=2, `priority:trivial`=1, default=3
+- Cron defaults off (`autoStartCron: false`) so tests don't auto-start it
+
+### Still TODO (Phase 4 — Office Canvas)
+- Station layout with LimeZu tiles (Step 14)
+- Agent sprites at stations (Step 15)
+- Walk animation (Step 16)
+- Agent state badges (Step 17)
+- Meeting room (Step 18)
+- Office level gates (Step 19)
+
+---
+
 ## Phase 2 — Pipeline Execution (Steps 5–9) [DONE]
 
 **Goal:** Idle agents automatically pick tasks, run Claude SDK per stage with personality, advance stages, award XP.
