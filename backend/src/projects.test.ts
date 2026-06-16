@@ -112,7 +112,7 @@ describe("deleteProject", () => {
   it("removes the project and its tasks", () => {
     const db = createDb();
     const project = createProject(db, { source: "path", value: repoDir });
-    const task = createTask(db, project, { description: "do the thing", mode: "sdk" });
+    const task = createTask(db, { projectId: project.id, title: "do the thing", description: "do the thing" });
 
     deleteProject(db, project.id);
 
@@ -120,6 +120,6 @@ describe("deleteProject", () => {
     expect(listProjects(db)).toEqual([]);
     expect(db.prepare("SELECT * FROM tasks WHERE id = ?").get(task.id)).toBeUndefined();
 
-    rmSync(task.worktreePath, { recursive: true, force: true });
+    if (task.worktreePath) rmSync(task.worktreePath, { recursive: true, force: true });
   });
 });

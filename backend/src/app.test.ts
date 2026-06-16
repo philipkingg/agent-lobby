@@ -1,54 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { buildApp } from "./app.js";
-import { createDb } from "./db.js";
-import type { QueryFn } from "./agent-runner.js";
-import type { SpawnFn, PtyProcess } from "./pty-runner.js";
-import type { ExecFn } from "./pr-service.js";
-
-// Resolves immediately with a successful result, triggering the "done" -> PR flow.
-const successQuery: QueryFn = async function* () {
-  yield {
-    type: "result",
-    subtype: "success",
-    uuid: "u1",
-    session_id: "sess-1",
-  } as never;
-};
-
-// Never resolves, so sdk-mode tasks stay "running" without hitting the real SDK.
-const neverQuery: QueryFn = async function* () {
-  await new Promise(() => {});
-};
-
-// Reports a session id, then hangs - simulates a task still "running" at the moment of a server restart.
-const hangAfterSessionQuery: QueryFn = async function* () {
-  yield {
-    type: "assistant",
-    uuid: "u1",
-    session_id: "sess-99",
-    message: { content: [{ type: "text", text: "working" }] },
-    parent_tool_use_id: null,
-  } as never;
-  await new Promise(() => {});
-};
-
-// A fake pty process that never exits on its own, so tests can drive it via stop().
-function fakeSpawnFn(): SpawnFn {
-  return () => {
-    const proc: PtyProcess = {
-      onData: () => {},
-      onExit: () => {},
-      write: () => {},
-      resize: () => {},
-      kill: () => {},
-    };
-    return proc;
-  };
-}
+import { createDb, SCHEMA_VERSION } from "./db.js";
+type DbType = ReturnType<typeof createDb>;
 
 const GIT_ENV = {
   ...process.env,
@@ -58,13 +15,22 @@ const GIT_ENV = {
   GIT_COMMITTER_EMAIL: "t@t.com",
 };
 
-describe("GET /health", () => {
-  it("returns ok status", async () => {
-    const app = buildApp();
-    const response = await app.inject({ method: "GET", url: "/health" });
+function makeRepo() {
+  const dir = mkdtempSync(path.join(tmpdir(), "agent-sims-repo-"));
+  execFileSync("git", ["init", "-b", "main"], { cwd: dir });
+  execFileSync("git", ["commit", "--allow-empty", "-m", "init", "--no-gpg-sign"], {
+    cwd: dir,
+    env: GIT_ENV,
+  });
+  return dir;
+}
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ status: "ok" });
+describe("GET /health", () => {
+  it("returns ok + schema version", async () => {
+    const app = buildApp();
+    const res = await app.inject({ method: "GET", url: "/health" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ status: "ok", schemaVersion: SCHEMA_VERSION });
   });
 });
 
@@ -72,12 +38,7 @@ describe("/projects", () => {
   let repoDir: string;
 
   beforeEach(() => {
-    repoDir = mkdtempSync(path.join(tmpdir(), "agent-office-repo-"));
-    execFileSync("git", ["init", "-b", "main"], { cwd: repoDir });
-    execFileSync("git", ["commit", "--allow-empty", "-m", "init", "--no-gpg-sign"], {
-      cwd: repoDir,
-      env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t.com", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t.com" },
-    });
+    repoDir = makeRepo();
   });
 
   afterEach(() => {
@@ -86,587 +47,323 @@ describe("/projects", () => {
 
   it("POST creates a project, GET lists it", async () => {
     const app = buildApp();
-
-    const postResponse = await app.inject({
+    const post = await app.inject({
       method: "POST",
       url: "/projects",
       payload: { source: "path", value: repoDir },
     });
-    expect(postResponse.statusCode).toBe(201);
-    const created = postResponse.json();
+    expect(post.statusCode).toBe(201);
+    const created = post.json();
     expect(created.path).toBe(repoDir);
     expect(created.defaultBranch).toBe("main");
+    expect(created.autoMerge).toBe(1);
+    expect(created.githubUrl).toBeNull();
 
-    const getResponse = await app.inject({ method: "GET", url: "/projects" });
-    expect(getResponse.statusCode).toBe(200);
-    expect(getResponse.json()).toEqual([created]);
+    const get = await app.inject({ method: "GET", url: "/projects" });
+    expect(get.json()).toEqual([created]);
   });
 
-  it("POST rejects a non-git path", async () => {
+  it("POST rejects non-git path", async () => {
     const app = buildApp();
-    const nonGit = mkdtempSync(path.join(tmpdir(), "agent-office-plain-"));
-
-    const response = await app.inject({
+    const plain = mkdtempSync(path.join(tmpdir(), "plain-"));
+    const res = await app.inject({
       method: "POST",
       url: "/projects",
-      payload: { source: "path", value: nonGit },
+      payload: { source: "path", value: plain },
     });
-
-    expect(response.statusCode).toBe(400);
-    rmSync(nonGit, { recursive: true, force: true });
+    expect(res.statusCode).toBe(400);
+    rmSync(plain, { recursive: true, force: true });
   });
 
-  it("DELETE removes a project from the list", async () => {
+  it("DELETE removes project", async () => {
     const app = buildApp();
-
-    const postResponse = await app.inject({
+    const post = await app.inject({
       method: "POST",
       url: "/projects",
       payload: { source: "path", value: repoDir },
     });
-    const created = postResponse.json();
+    const project = post.json();
 
-    const deleteResponse = await app.inject({ method: "DELETE", url: `/projects/${created.id}` });
-    expect(deleteResponse.statusCode).toBe(200);
-    expect(deleteResponse.json()).toEqual({ ok: true });
+    const del = await app.inject({ method: "DELETE", url: `/projects/${project.id}` });
+    expect(del.statusCode).toBe(200);
 
-    const getResponse = await app.inject({ method: "GET", url: "/projects" });
-    expect(getResponse.json()).toEqual([]);
-  });
-
-  it("DELETE returns 404 for an unknown project", async () => {
-    const app = buildApp();
-
-    const response = await app.inject({ method: "DELETE", url: "/projects/no-such-project" });
-    expect(response.statusCode).toBe(404);
+    const get = await app.inject({ method: "GET", url: "/projects" });
+    expect(get.json()).toEqual([]);
   });
 });
 
-describe("/projects/:id/tasks", () => {
-  let repoDir: string;
-  let worktreesRoot: string;
+describe("/agents", () => {
+  it("POST hires an agent with generated personality", async () => {
+    const app = buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/agents",
+      payload: { jobType: "implementer" },
+    });
+    expect(res.statusCode).toBe(201);
+    const agent = res.json();
+    expect(agent.jobType).toBe("implementer");
+    expect(agent.model).toBe("claude-sonnet-4-6");
+    expect(agent.level).toBe(1);
+    expect(["Adam", "Alex", "Amelia", "Bob"]).toContain(agent.avatar);
+    expect(typeof agent.personality).toBe("string");
+    const p = JSON.parse(agent.personality);
+    expect(p.traits.length).toBeGreaterThanOrEqual(3);
+  });
 
-  beforeEach(() => {
-    repoDir = mkdtempSync(path.join(tmpdir(), "agent-office-repo-"));
-    execFileSync("git", ["init", "-b", "main"], { cwd: repoDir });
-    execFileSync("git", ["commit", "--allow-empty", "-m", "init", "--no-gpg-sign"], { cwd: repoDir, env: GIT_ENV });
-    worktreesRoot = path.join(repoDir, "..", `${path.basename(repoDir)}-worktrees`);
+  it("POST rejects invalid job type", async () => {
+    const app = buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/agents",
+      payload: { jobType: "hacker" },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("GET lists hired agents", async () => {
+    const app = buildApp();
+    await app.inject({ method: "POST", url: "/agents", payload: { jobType: "planner" } });
+    await app.inject({ method: "POST", url: "/agents", payload: { jobType: "reviewer" } });
+
+    const res = await app.inject({ method: "GET", url: "/agents" });
+    expect(res.json()).toHaveLength(2);
+  });
+
+  it("DELETE fires agent, removes from GET list", async () => {
+    const app = buildApp();
+    const hire = await app.inject({ method: "POST", url: "/agents", payload: { jobType: "merger" } });
+    const agent = hire.json();
+
+    const fire = await app.inject({ method: "DELETE", url: `/agents/${agent.id}` });
+    expect(fire.statusCode).toBe(200);
+
+    const list = await app.inject({ method: "GET", url: "/agents" });
+    expect(list.json()).toHaveLength(0);
+  });
+
+  it("DELETE returns 404 for unknown agent", async () => {
+    const app = buildApp();
+    const res = await app.inject({ method: "DELETE", url: "/agents/no-such" });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe("/squads", () => {
+  it("POST creates squad, GET lists it", async () => {
+    const app = buildApp();
+    const post = await app.inject({
+      method: "POST",
+      url: "/squads",
+      payload: { name: "Frontend Team" },
+    });
+    expect(post.statusCode).toBe(201);
+    const squad = post.json();
+    expect(squad.name).toBe("Frontend Team");
+
+    const get = await app.inject({ method: "GET", url: "/squads" });
+    expect(get.json()).toHaveLength(1);
+  });
+
+  it("POST rejects missing name", async () => {
+    const app = buildApp();
+    const res = await app.inject({ method: "POST", url: "/squads", payload: {} });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("PUT updates squad name and projects", async () => {
+    const app = buildApp();
+    const post = await app.inject({
+      method: "POST",
+      url: "/squads",
+      payload: { name: "Old Name" },
+    });
+    const squad = post.json();
+
+    const put = await app.inject({
+      method: "PUT",
+      url: `/squads/${squad.id}`,
+      payload: { name: "New Name", projectIds: ["proj-abc"] },
+    });
+    expect(put.statusCode).toBe(200);
+    expect(put.json().name).toBe("New Name");
+    expect(JSON.parse(put.json().projectIds)).toContain("proj-abc");
+  });
+
+  it("agents can be added to and removed from squads", async () => {
+    const app = buildApp();
+    const squad = (
+      await app.inject({ method: "POST", url: "/squads", payload: { name: "Squad A" } })
+    ).json();
+    const agent = (
+      await app.inject({ method: "POST", url: "/agents", payload: { jobType: "implementer" } })
+    ).json();
+
+    const add = await app.inject({
+      method: "POST",
+      url: `/squads/${squad.id}/agents`,
+      payload: { agentId: agent.id },
+    });
+    expect(add.statusCode).toBe(200);
+
+    const agentGet = await app.inject({ method: "GET", url: `/agents/${agent.id}` });
+    expect(agentGet.json().squadId).toBe(squad.id);
+
+    const remove = await app.inject({
+      method: "DELETE",
+      url: `/squads/${squad.id}/agents/${agent.id}`,
+    });
+    expect(remove.statusCode).toBe(200);
+
+    const agentAfter = await app.inject({ method: "GET", url: `/agents/${agent.id}` });
+    expect(agentAfter.json().squadId).toBeNull();
+  });
+});
+
+describe("/tasks", () => {
+  let repoDir: string;
+  let projectId: string;
+  let sharedDb: DbType;
+
+  beforeEach(async () => {
+    repoDir = makeRepo();
+    sharedDb = createDb();
+    const app = buildApp(sharedDb);
+    const proj = await app.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { source: "path", value: repoDir },
+    });
+    projectId = proj.json().id;
   });
 
   afterEach(() => {
     rmSync(repoDir, { recursive: true, force: true });
-    rmSync(worktreesRoot, { recursive: true, force: true });
   });
 
-  it("creates a task with an isolated worktree, and lists/fetches it", async () => {
-    const app = buildApp(undefined, neverQuery);
-
-    const projectResponse = await app.inject({
+  it("POST creates task at queued:prioritize", async () => {
+    const app = buildApp(sharedDb);
+    const post = await app.inject({
       method: "POST",
-      url: "/projects",
-      payload: { source: "path", value: repoDir },
+      url: "/tasks",
+      payload: { projectId, title: "Add login", description: "OAuth login flow" },
     });
-    const project = projectResponse.json();
-
-    const taskResponse = await app.inject({
-      method: "POST",
-      url: `/projects/${project.id}/tasks`,
-      payload: { description: "do the thing", mode: "sdk" },
-    });
-
-    expect(taskResponse.statusCode).toBe(201);
-    const task = taskResponse.json();
-    expect(task.status).toBe("running");
-    expect(task.branchName).toBe(`agent/do-the-thing-${task.id.slice(0, 8)}`);
-    expect(existsSync(task.worktreePath)).toBe(true);
-
-    const listResponse = await app.inject({ method: "GET", url: "/tasks" });
-    expect(listResponse.json()).toEqual([task]);
-
-    const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
-    expect(getResponse.json()).toEqual(task);
-  });
-
-  it("returns 404 for an unknown project", async () => {
-    const app = buildApp();
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/projects/no-such-project/tasks",
-      payload: { description: "do the thing", mode: "sdk" },
-    });
-
-    expect(response.statusCode).toBe(404);
-  });
-
-  it("creates a pty task and stops it via /tasks/:id/stop", async () => {
-    const app = buildApp(undefined, neverQuery, fakeSpawnFn());
-
-    const projectResponse = await app.inject({
-      method: "POST",
-      url: "/projects",
-      payload: { source: "path", value: repoDir },
-    });
-    const project = projectResponse.json();
-
-    const taskResponse = await app.inject({
-      method: "POST",
-      url: `/projects/${project.id}/tasks`,
-      payload: { description: "interactive session", mode: "pty" },
-    });
-    expect(taskResponse.statusCode).toBe(201);
-    const task = taskResponse.json();
-
-    const stopResponse = await app.inject({ method: "POST", url: `/tasks/${task.id}/stop` });
-    expect(stopResponse.statusCode).toBe(200);
-
-    const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
-    expect(getResponse.json().status).toBe("stopped");
-
-    const secondStop = await app.inject({ method: "POST", url: `/tasks/${task.id}/stop` });
-    expect(secondStop.statusCode).toBe(409);
-  });
-
-  it("opens a PR when a task completes successfully", async () => {
-    const calls: { cmd: string; args: string[] }[] = [];
-    const execFn: ExecFn = (cmd, args) => {
-      calls.push({ cmd, args });
-      if (cmd === "gh") return "https://github.com/acme/repo/pull/7\n";
-      return "";
-    };
-
-    const app = buildApp(undefined, successQuery, undefined, execFn);
-
-    const projectResponse = await app.inject({
-      method: "POST",
-      url: "/projects",
-      payload: { source: "path", value: repoDir },
-    });
-    const project = projectResponse.json();
-
-    const taskResponse = await app.inject({
-      method: "POST",
-      url: `/projects/${project.id}/tasks`,
-      payload: { description: "do the thing", mode: "sdk" },
-    });
-    const task = taskResponse.json();
-
-    let body: { status: string; prUrl: string | null } = { status: "running", prUrl: null };
-    for (let i = 0; i < 50 && body.status !== "done"; i++) {
-      const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
-      body = getResponse.json();
-      if (body.status !== "done") await new Promise((r) => setTimeout(r, 5));
-    }
-
-    expect(body.status).toBe("done");
-    expect(body.prUrl).toBe("https://github.com/acme/repo/pull/7");
-    expect(calls.map((c) => c.cmd)).toEqual(["git", "git", "gh", "gh"]);
-  });
-
-  it("resumes a running sdk task with its sessionId on restart", async () => {
-    const db = createDb();
-    const app = buildApp(db, hangAfterSessionQuery);
-
-    const projectResponse = await app.inject({
-      method: "POST",
-      url: "/projects",
-      payload: { source: "path", value: repoDir },
-    });
-    const project = projectResponse.json();
-
-    const taskResponse = await app.inject({
-      method: "POST",
-      url: `/projects/${project.id}/tasks`,
-      payload: { description: "do the thing", mode: "sdk" },
-    });
-    const task = taskResponse.json();
-
-    let body: { sessionId: string | null } = { sessionId: null };
-    for (let i = 0; i < 50 && !body.sessionId; i++) {
-      const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
-      body = getResponse.json();
-      if (!body.sessionId) await new Promise((r) => setTimeout(r, 5));
-    }
-    expect(body.sessionId).toBe("sess-99");
-
-    // "Restart" by building a new app against the same db; it should resume the running task.
-    let receivedResume: string | undefined;
-    const resumeQuery: QueryFn = async function* (params) {
-      receivedResume = params.options?.resume as string | undefined;
-      yield { type: "result", subtype: "success", uuid: "u2", session_id: "sess-99" } as never;
-    };
-
-    const restarted = buildApp(db, resumeQuery);
-
-    let status = "running";
-    for (let i = 0; i < 50 && status !== "done"; i++) {
-      const getResponse = await restarted.inject({ method: "GET", url: `/tasks/${task.id}` });
-      status = getResponse.json().status;
-      if (status !== "done") await new Promise((r) => setTimeout(r, 5));
-    }
-
-    expect(status).toBe("done");
-    expect(receivedResume).toBe("sess-99");
-  });
-
-  it("marks a running pty task as failed on restart", async () => {
-    const db = createDb();
-    const app = buildApp(db, neverQuery, fakeSpawnFn());
-
-    const projectResponse = await app.inject({
-      method: "POST",
-      url: "/projects",
-      payload: { source: "path", value: repoDir },
-    });
-    const project = projectResponse.json();
-
-    const taskResponse = await app.inject({
-      method: "POST",
-      url: `/projects/${project.id}/tasks`,
-      payload: { description: "interactive session", mode: "pty" },
-    });
-    const task = taskResponse.json();
-    expect(task.status).toBe("running");
-
-    const restarted = buildApp(db, neverQuery, fakeSpawnFn());
-
-    const getResponse = await restarted.inject({ method: "GET", url: `/tasks/${task.id}` });
-    const restartedTask = getResponse.json();
-    expect(restartedTask.status).toBe("failed");
-    expect(restartedTask.error).toMatch(/cannot be resumed/);
-  });
-
-  it("removes a completed task's worktree via DELETE /tasks/:id/worktree", async () => {
-    const calls: { cmd: string; args: string[] }[] = [];
-    const execFn: ExecFn = (cmd, args) => {
-      calls.push({ cmd, args });
-      if (cmd === "gh") return "https://github.com/acme/repo/pull/7\n";
-      return "";
-    };
-
-    const app = buildApp(undefined, successQuery, undefined, execFn);
-
-    const projectResponse = await app.inject({
-      method: "POST",
-      url: "/projects",
-      payload: { source: "path", value: repoDir },
-    });
-    const project = projectResponse.json();
-
-    const taskResponse = await app.inject({
-      method: "POST",
-      url: `/projects/${project.id}/tasks`,
-      payload: { description: "do the thing", mode: "sdk" },
-    });
-    const task = taskResponse.json();
-
-    let body: { status: string } = { status: "running" };
-    for (let i = 0; i < 50 && body.status !== "done"; i++) {
-      const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
-      body = getResponse.json();
-      if (body.status !== "done") await new Promise((r) => setTimeout(r, 5));
-    }
-    expect(body.status).toBe("done");
-
-    expect(existsSync(task.worktreePath)).toBe(true);
-
-    const deleteResponse = await app.inject({ method: "DELETE", url: `/tasks/${task.id}/worktree` });
-    expect(deleteResponse.statusCode).toBe(200);
-    expect(deleteResponse.json().worktreeRemoved).toBe(1);
-    expect(existsSync(task.worktreePath)).toBe(false);
-  });
-
-  it("supports the draft -> start -> done -> close kanban lifecycle", async () => {
-    const execFn: ExecFn = (cmd) => (cmd === "gh" ? "https://github.com/acme/repo/pull/7\n" : "");
-    const app = buildApp(undefined, successQuery, undefined, execFn);
-
-    const projectResponse = await app.inject({
-      method: "POST",
-      url: "/projects",
-      payload: { source: "path", value: repoDir },
-    });
-    const project = projectResponse.json();
-
-    // Create as a draft ticket: no worktree/branch/desk yet.
-    const ticketResponse = await app.inject({
-      method: "POST",
-      url: `/projects/${project.id}/tasks`,
-      payload: { description: "do the thing", mode: "sdk", draft: true },
-    });
-    expect(ticketResponse.statusCode).toBe(201);
-    const ticket = ticketResponse.json();
-    expect(ticket.status).toBe("draft");
-    expect(ticket.branchName).toBe("");
-    expect(ticket.worktreePath).toBe("");
-    expect(ticket.deskIndex).toBeNull();
-
-    // Starting it creates the worktree and dispatches it.
-    const startResponse = await app.inject({ method: "POST", url: `/tasks/${ticket.id}/start` });
-    expect(startResponse.statusCode).toBe(200);
-    const started = startResponse.json();
-    expect(started.branchName).toBe(`agent/do-the-thing-${ticket.id.slice(0, 8)}`);
-    expect(existsSync(started.worktreePath)).toBe(true);
-
-    // Starting again is rejected - it's no longer a draft.
-    const restartResponse = await app.inject({ method: "POST", url: `/tasks/${ticket.id}/start` });
-    expect(restartResponse.statusCode).toBe(409);
-
-    let body: { status: string } = { status: "running" };
-    for (let i = 0; i < 50 && body.status !== "done"; i++) {
-      const getResponse = await app.inject({ method: "GET", url: `/tasks/${ticket.id}` });
-      body = getResponse.json();
-      if (body.status !== "done") await new Promise((r) => setTimeout(r, 5));
-    }
-    expect(body.status).toBe("done");
-
-    // Closing a "done" (in code review) ticket moves it to "closed" (Done column).
-    const closeResponse = await app.inject({ method: "POST", url: `/tasks/${ticket.id}/close` });
-    expect(closeResponse.statusCode).toBe(200);
-    expect(closeResponse.json().status).toBe("closed");
-
-    // Closing again is rejected - it's no longer "done".
-    const recloseResponse = await app.inject({ method: "POST", url: `/tasks/${ticket.id}/close` });
-    expect(recloseResponse.statusCode).toBe(409);
-  });
-
-  it("returns 409 starting a non-draft task and 409 closing a non-done task", async () => {
-    const app = buildApp(undefined, neverQuery);
-
-    const projectResponse = await app.inject({
-      method: "POST",
-      url: "/projects",
-      payload: { source: "path", value: repoDir },
-    });
-    const project = projectResponse.json();
-
-    const taskResponse = await app.inject({
-      method: "POST",
-      url: `/projects/${project.id}/tasks`,
-      payload: { description: "do the thing", mode: "sdk" },
-    });
-    const task = taskResponse.json();
-    expect(task.status).toBe("running");
-
-    const startResponse = await app.inject({ method: "POST", url: `/tasks/${task.id}/start` });
-    expect(startResponse.statusCode).toBe(409);
-
-    const closeResponse = await app.inject({ method: "POST", url: `/tasks/${task.id}/close` });
-    expect(closeResponse.statusCode).toBe(409);
-  });
-
-  it("deletes a completed task and its worktree via DELETE /tasks/:id", async () => {
-    const execFn: ExecFn = (cmd) => (cmd === "gh" ? "https://github.com/acme/repo/pull/7\n" : "");
-    const app = buildApp(undefined, successQuery, undefined, execFn);
-
-    const projectResponse = await app.inject({
-      method: "POST",
-      url: "/projects",
-      payload: { source: "path", value: repoDir },
-    });
-    const project = projectResponse.json();
-
-    const taskResponse = await app.inject({
-      method: "POST",
-      url: `/projects/${project.id}/tasks`,
-      payload: { description: "do the thing", mode: "sdk" },
-    });
-    const task = taskResponse.json();
-
-    let body: { status: string } = { status: "running" };
-    for (let i = 0; i < 50 && body.status !== "done"; i++) {
-      const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
-      body = getResponse.json();
-      if (body.status !== "done") await new Promise((r) => setTimeout(r, 5));
-    }
-    expect(body.status).toBe("done");
-
-    const deleteResponse = await app.inject({ method: "DELETE", url: `/tasks/${task.id}` });
-    expect(deleteResponse.statusCode).toBe(200);
-    expect(existsSync(task.worktreePath)).toBe(false);
-
-    const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
-    expect(getResponse.statusCode).toBe(404);
-  });
-
-  it("cancels and deletes a running sdk task", async () => {
-    const app = buildApp(undefined, neverQuery);
-
-    const projectResponse = await app.inject({
-      method: "POST",
-      url: "/projects",
-      payload: { source: "path", value: repoDir },
-    });
-    const project = projectResponse.json();
-
-    const taskResponse = await app.inject({
-      method: "POST",
-      url: `/projects/${project.id}/tasks`,
-      payload: { description: "do the thing", mode: "sdk" },
-    });
-    const task = taskResponse.json();
-    expect(task.status).toBe("running");
-
-    const deleteResponse = await app.inject({ method: "DELETE", url: `/tasks/${task.id}` });
-    expect(deleteResponse.statusCode).toBe(200);
-    expect(existsSync(task.worktreePath)).toBe(false);
-
-    const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
-    expect(getResponse.statusCode).toBe(404);
-  });
-
-  it("cancels and deletes a running pty task", async () => {
-    const app = buildApp(undefined, neverQuery, fakeSpawnFn());
-
-    const projectResponse = await app.inject({
-      method: "POST",
-      url: "/projects",
-      payload: { source: "path", value: repoDir },
-    });
-    const project = projectResponse.json();
-
-    const taskResponse = await app.inject({
-      method: "POST",
-      url: `/projects/${project.id}/tasks`,
-      payload: { description: "interactive session", mode: "pty" },
-    });
-    const task = taskResponse.json();
-
-    const deleteResponse = await app.inject({ method: "DELETE", url: `/tasks/${task.id}` });
-    expect(deleteResponse.statusCode).toBe(200);
-
-    const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
-    expect(getResponse.statusCode).toBe(404);
-  });
-
-  it("cancels and deletes a queued task", async () => {
-    const app = buildApp(undefined, neverQuery);
-
-    const projectResponse = await app.inject({
-      method: "POST",
-      url: "/projects",
-      payload: { source: "path", value: repoDir },
-    });
-    const project = projectResponse.json();
-
-    await app.inject({
-      method: "POST",
-      url: `/settings`,
-      payload: { maxConcurrentAgents: 1 },
-    });
-
-    await app.inject({
-      method: "POST",
-      url: `/projects/${project.id}/tasks`,
-      payload: { description: "first task", mode: "sdk" },
-    });
-
-    const taskResponse = await app.inject({
-      method: "POST",
-      url: `/projects/${project.id}/tasks`,
-      payload: { description: "second task", mode: "sdk" },
-    });
-    const task = taskResponse.json();
+    expect(post.statusCode).toBe(201);
+    const task = post.json();
+    expect(task.stage).toBe("queued:prioritize");
     expect(task.status).toBe("queued");
-
-    const deleteResponse = await app.inject({ method: "DELETE", url: `/tasks/${task.id}` });
-    expect(deleteResponse.statusCode).toBe(200);
-
-    const getResponse = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
-    expect(getResponse.statusCode).toBe(404);
+    expect(task.priority).toBe(3);
+    expect(task.requiresHumanReview).toBe(0);
   });
 
-  it("rejects deleting an already-deleted task", async () => {
-    const app = buildApp();
+  it("POST tasks are returned priority-ordered", async () => {
+    const app = buildApp(sharedDb);
+    await app.inject({
+      method: "POST",
+      url: "/tasks",
+      payload: { projectId, title: "low", description: "d", priority: 1 },
+    });
+    await app.inject({
+      method: "POST",
+      url: "/tasks",
+      payload: { projectId, title: "high", description: "d", priority: 5 },
+    });
 
-    const deleteResponse = await app.inject({ method: "DELETE", url: `/tasks/no-such-task` });
-    expect(deleteResponse.statusCode).toBe(404);
+    const get = await app.inject({ method: "GET", url: "/tasks" });
+    const tasks = get.json();
+    expect(tasks[0].title).toBe("high");
+    expect(tasks[1].title).toBe("low");
   });
 
-  it("rejects worktree removal for a running task", async () => {
-    const app = buildApp(undefined, neverQuery);
-
-    const projectResponse = await app.inject({
+  it("POST rejects invalid priority", async () => {
+    const app = buildApp(sharedDb);
+    const res = await app.inject({
       method: "POST",
-      url: "/projects",
-      payload: { source: "path", value: repoDir },
+      url: "/tasks",
+      payload: { projectId, title: "t", description: "d", priority: 10 },
     });
-    const project = projectResponse.json();
-
-    const taskResponse = await app.inject({
-      method: "POST",
-      url: `/projects/${project.id}/tasks`,
-      payload: { description: "do the thing", mode: "sdk" },
-    });
-    const task = taskResponse.json();
-
-    const deleteResponse = await app.inject({ method: "DELETE", url: `/tasks/${task.id}/worktree` });
-    expect(deleteResponse.statusCode).toBe(409);
+    expect(res.statusCode).toBe(400);
   });
 
-  it("assigns a task to a specific worker's desk via deskIndex", async () => {
-    const app = buildApp(undefined, neverQuery);
-
-    const projectResponse = await app.inject({
+  it("POST /tasks/:id/approve advances awaiting_approval task", async () => {
+    const db = sharedDb;
+    const app = buildApp(db);
+    const post = await app.inject({
       method: "POST",
-      url: "/projects",
-      payload: { source: "path", value: repoDir },
+      url: "/tasks",
+      payload: { projectId, title: "t", description: "d", requiresHumanReview: true },
     });
-    const project = projectResponse.json();
+    const task = post.json();
 
-    const taskResponse = await app.inject({
-      method: "POST",
-      url: `/projects/${project.id}/tasks`,
-      payload: { description: "do the thing", mode: "sdk", deskIndex: 3 },
-    });
+    // Manually advance to awaiting_approval
+    db.prepare(
+      `UPDATE tasks SET stage = 'queued:plan', status = 'awaiting_approval' WHERE id = ?`
+    ).run(task.id);
 
-    expect(taskResponse.statusCode).toBe(201);
-    expect(taskResponse.json().deskIndex).toBe(3);
+    const approve = await app.inject({ method: "POST", url: `/tasks/${task.id}/approve` });
+    expect(approve.statusCode).toBe(200);
+    expect(approve.json().status).toBe("queued");
   });
 
-  it("returns 400 for an invalid mode", async () => {
-    const app = buildApp();
-
-    const projectResponse = await app.inject({
+  it("POST /tasks/:id/retry re-queues stuck task", async () => {
+    const db = sharedDb;
+    const app = buildApp(db);
+    const post = await app.inject({
       method: "POST",
-      url: "/projects",
-      payload: { source: "path", value: repoDir },
+      url: "/tasks",
+      payload: { projectId, title: "t", description: "d" },
     });
-    const project = projectResponse.json();
+    const task = post.json();
+    db.prepare(`UPDATE tasks SET status = 'stuck' WHERE id = ?`).run(task.id);
 
-    const response = await app.inject({
+    const retry = await app.inject({ method: "POST", url: `/tasks/${task.id}/retry` });
+    expect(retry.statusCode).toBe(200);
+    expect(retry.json().status).toBe("queued");
+  });
+
+  it("DELETE /tasks/:id removes task", async () => {
+    const app = buildApp(sharedDb);
+    const post = await app.inject({
       method: "POST",
-      url: `/projects/${project.id}/tasks`,
-      payload: { description: "do the thing", mode: "bogus" },
+      url: "/tasks",
+      payload: { projectId, title: "t", description: "d" },
     });
+    const task = post.json();
 
-    expect(response.statusCode).toBe(400);
+    const del = await app.inject({ method: "DELETE", url: `/tasks/${task.id}` });
+    expect(del.statusCode).toBe(200);
+
+    const get = await app.inject({ method: "GET", url: `/tasks/${task.id}` });
+    expect(get.statusCode).toBe(404);
+  });
+
+  it("returns 404 for unknown project on task creation", async () => {
+    const app = buildApp(sharedDb);
+    const res = await app.inject({
+      method: "POST",
+      url: "/tasks",
+      payload: { projectId: "no-such-project", title: "t", description: "d" },
+    });
+    expect(res.statusCode).toBe(404);
   });
 });
 
-describe("GET /workers", () => {
-  it("returns one named worker per concurrency slot, stable across requests", async () => {
-    const app = buildApp();
-
-    const first = await app.inject({ method: "GET", url: "/workers" });
-    expect(first.statusCode).toBe(200);
-    const workers = first.json();
-    expect(workers).toHaveLength(4); // default maxConcurrentAgents
-    expect(workers.map((w: { deskIndex: number }) => w.deskIndex)).toEqual([0, 1, 2, 3]);
-    for (const worker of workers) {
-      expect(typeof worker.name).toBe("string");
-      expect(worker.name.length).toBeGreaterThan(0);
-    }
-
-    const second = await app.inject({ method: "GET", url: "/workers" });
-    expect(second.json()).toEqual(workers);
+describe("DB schema migration", () => {
+  it("fresh DB gets schema version 2", () => {
+    const db = createDb();
+    const row = db
+      .prepare(`SELECT value FROM settings WHERE key = 'schemaVersion'`)
+      .get() as { value: string };
+    expect(Number(row.value)).toBe(SCHEMA_VERSION);
   });
 
-  it("grows with maxConcurrentAgents", async () => {
-    const app = buildApp();
-
-    await app.inject({ method: "POST", url: "/settings", payload: { maxConcurrentAgents: 6 } });
-
-    const response = await app.inject({ method: "GET", url: "/workers" });
-    expect(response.json()).toHaveLength(6);
+  it("user_profile seeded with level 1", () => {
+    const db = createDb();
+    const profile = db.prepare(`SELECT * FROM user_profile WHERE id = 1`).get() as {
+      level: number;
+      xp: number;
+    };
+    expect(profile.level).toBe(1);
+    expect(profile.xp).toBe(0);
   });
 });

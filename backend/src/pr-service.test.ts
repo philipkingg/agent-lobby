@@ -9,26 +9,32 @@ const project: Project = {
   path: "/tmp/repo",
   defaultBranch: "main",
   worktreesRoot: "/tmp/repo-worktrees",
+  githubUrl: null,
+  autoMerge: 1,
   createdAt: new Date().toISOString(),
 };
 
+const now = new Date().toISOString();
 const task: Task = {
   id: "task-1",
   projectId: project.id,
+  title: "do the thing",
   description: "do the thing",
-  mode: "sdk",
+  priority: 3,
+  stage: "queued:merge",
   status: "done",
-  sessionId: null,
-  branchName: "agent/task-1",
+  requiresHumanReview: 0,
+  reviewLoopCount: 0,
   worktreePath: "/tmp/repo-worktrees/task-1",
+  branch: "agent/task-1",
   prUrl: null,
-  prError: null,
-  error: null,
-  worktreeRemoved: 0,
-  deskIndex: 0,
+  source: "human",
+  githubIssueNumber: null,
+  sessionId: null,
   pendingQuestion: null,
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
+  error: null,
+  createdAt: now,
+  updatedAt: now,
 };
 
 describe("createPullRequest", () => {

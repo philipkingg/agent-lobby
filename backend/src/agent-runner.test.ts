@@ -12,54 +12,51 @@ const project: Project = {
   path: "/tmp/repo",
   defaultBranch: "main",
   worktreesRoot: "/tmp/repo-worktrees",
+  githubUrl: null,
+  autoMerge: 1,
   createdAt: new Date().toISOString(),
 };
 
 function makeTask(db: ReturnType<typeof createDb>, overrides: Partial<Task> = {}): Task {
   db.prepare(
-    `INSERT OR IGNORE INTO projects (id, name, path, defaultBranch, worktreesRoot, createdAt) VALUES (?, ?, ?, ?, ?, ?)`
+    `INSERT OR IGNORE INTO projects (id, name, path, defaultBranch, worktreesRoot, githubUrl, autoMerge, createdAt)
+     VALUES (?, ?, ?, ?, ?, NULL, 1, ?)`
   ).run(project.id, project.name, project.path, project.defaultBranch, project.worktreesRoot, project.createdAt);
 
+  const now = new Date().toISOString();
   const task: Task = {
     id: "task-1",
     projectId: project.id,
+    title: "do the thing",
     description: "do the thing",
-    mode: "sdk",
+    priority: 3,
+    stage: "queued:implement",
     status: "running",
-    sessionId: null,
-    branchName: "agent/task-1",
+    requiresHumanReview: 0,
+    reviewLoopCount: 0,
     worktreePath: "/tmp/repo-worktrees/task-1",
+    branch: "agent/task-1",
     prUrl: null,
-    prError: null,
-    error: null,
-    worktreeRemoved: 0,
-    deskIndex: null,
+    source: "human",
+    githubIssueNumber: null,
+    sessionId: null,
     pendingQuestion: null,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    error: null,
+    createdAt: now,
+    updatedAt: now,
     ...overrides,
   };
 
   db.prepare(
     `INSERT INTO tasks
-      (id, projectId, description, mode, status, sessionId, branchName, worktreePath, prUrl, prError, error, deskIndex, pendingQuestion, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (id, projectId, title, description, priority, stage, status, requiresHumanReview, reviewLoopCount,
+       worktreePath, branch, prUrl, source, githubIssueNumber, sessionId, pendingQuestion, error, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    task.id,
-    task.projectId,
-    task.description,
-    task.mode,
-    task.status,
-    task.sessionId,
-    task.branchName,
-    task.worktreePath,
-    task.prUrl,
-    task.prError,
-    task.error,
-    task.deskIndex,
-    task.pendingQuestion,
-    task.createdAt,
-    task.updatedAt
+    task.id, task.projectId, task.title, task.description, task.priority, task.stage, task.status,
+    task.requiresHumanReview, task.reviewLoopCount, task.worktreePath, task.branch,
+    task.prUrl, task.source, task.githubIssueNumber, task.sessionId, task.pendingQuestion,
+    task.error, task.createdAt, task.updatedAt
   );
 
   return task;
@@ -283,7 +280,7 @@ describe("AgentRunner.run", () => {
     await runner.run(task, project);
 
     const updated = getTask(db, task.id)!;
-    expect(updated.status).toBe("failed");
+    expect(updated.status).toBe("error");
     expect(updated.error).toBe("resume not possible");
     expect(events.filter((e) => e.type === "status")).toEqual([{ type: "status", status: "failed" }]);
   });

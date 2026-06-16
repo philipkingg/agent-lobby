@@ -10,6 +10,8 @@ export interface Project {
   path: string;
   defaultBranch: string;
   worktreesRoot: string;
+  githubUrl: string | null;
+  autoMerge: number; // 1 = enabled, 0 = disabled
   createdAt: string;
 }
 
@@ -90,13 +92,15 @@ export function createProject(db: DatabaseSync, input: CreateProjectInput, gitEx
     path: repoPath,
     defaultBranch,
     worktreesRoot,
+    githubUrl: input.source === "url" ? input.value : null,
+    autoMerge: 1,
     createdAt: new Date().toISOString(),
   };
 
   db.prepare(
-    `INSERT INTO projects (id, name, path, defaultBranch, worktreesRoot, createdAt)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(project.id, project.name, project.path, project.defaultBranch, project.worktreesRoot, project.createdAt);
+    `INSERT INTO projects (id, name, path, defaultBranch, worktreesRoot, githubUrl, autoMerge, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(project.id, project.name, project.path, project.defaultBranch, project.worktreesRoot, project.githubUrl, project.autoMerge, project.createdAt);
 
   return project;
 }

@@ -1,269 +1,412 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import type { Project } from "./projects.js";
-import { branchName, createWorktree } from "./worktrees.js";
-import { allocateDeskIndex } from "./desks.js";
 
-export type TaskMode = "sdk" | "pty";
-export type TaskStatus = "draft" | "queued" | "running" | "blocked" | "done" | "error" | "stopped" | "failed" | "closed";
+export type TaskStage =
+  | "queued:prioritize"
+  | "queued:plan"
+  | "queued:implement"
+  | "queued:review"
+  | "queued:merge"
+  | "done";
+
+export type TaskStatus = "queued" | "running" | "blocked" | "awaiting_approval" | "stuck" | "done" | "error";
+
+export type TaskSource = "human" | "github_issue";
 
 export interface Task {
   id: string;
   projectId: string;
+  title: string;
   description: string;
-  mode: TaskMode;
+  priority: number;
+  stage: TaskStage;
   status: TaskStatus;
-  sessionId: string | null;
-  branchName: string;
-  worktreePath: string;
+  requiresHumanReview: number; // SQLite stores booleans as integers
+  reviewLoopCount: number;
+  worktreePath: string | null;
+  branch: string | null;
   prUrl: string | null;
-  prError: string | null;
-  error: string | null;
-  worktreeRemoved: number;
-  deskIndex: number | null;
+  source: TaskSource;
+  githubIssueNumber: number | null;
+  // Legacy fields kept for AgentRunner compat until Phase 2 rewrite
+  sessionId: string | null;
   pendingQuestion: string | null;
+  error: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface CreateTaskInput {
+  projectId: string;
+  title: string;
   description: string;
-  mode: TaskMode;
+  priority?: number;
+  requiresHumanReview?: boolean;
+  source?: TaskSource;
+  githubIssueNumber?: number;
 }
 
-/**
- * Picks a desk for a newly-dispatched task. If `preferredDeskIndex` names an
- * idle worker (no task, or one parked "done" in code review), assign it
- * there - freeing the "done" task's desk if needed. Otherwise falls back to
- * the default allocation (reuse the oldest idle "done" desk, else first free).
- */
-function resolveDeskIndex(db: DatabaseSync, preferredDeskIndex: number | null | undefined, now: string): number | null {
-  const occupied = (
-    db.prepare(`SELECT id, deskIndex, status FROM tasks WHERE deskIndex IS NOT NULL`).all() as {
-      id: string;
-      deskIndex: number;
-      status: TaskStatus;
-    }[]
-  ).filter((row) => row.status !== "done");
-
-  if (preferredDeskIndex !== undefined && preferredDeskIndex !== null) {
-    const blocker = occupied.find((row) => row.deskIndex === preferredDeskIndex);
-    if (!blocker) {
-      // Free the desk if a "done" task is parked there - it's moving on.
-      db.prepare(`UPDATE tasks SET deskIndex = NULL, updatedAt = ? WHERE deskIndex = ? AND status = 'done'`).run(
-        now,
-        preferredDeskIndex
-      );
-      return preferredDeskIndex;
-    }
-  }
-
-  const idleAgent = db
-    .prepare(`SELECT id, deskIndex FROM tasks WHERE status = 'done' AND deskIndex IS NOT NULL ORDER BY updatedAt ASC LIMIT 1`)
-    .get() as { id: string; deskIndex: number } | undefined;
-
-  if (idleAgent) {
-    db.prepare(`UPDATE tasks SET deskIndex = NULL, updatedAt = ? WHERE id = ?`).run(now, idleAgent.id);
-    return idleAgent.deskIndex;
-  }
-
-  const taken = occupied.map((row) => row.deskIndex);
-  return allocateDeskIndex(taken);
+export interface TaskStageRecord {
+  id: string;
+  taskId: string;
+  stage: string;
+  agentId: string | null;
+  model: string | null;
+  status: "running" | "done" | "failed";
+  sessionId: string | null;
+  xpAwarded: number;
+  startedAt: string;
+  completedAt: string | null;
 }
 
-export function createTask(
-  db: DatabaseSync,
-  project: Project,
-  input: CreateTaskInput,
-  preferredDeskIndex?: number | null
-): Task {
+// Stage sequence for pipeline progression
+const STAGE_SEQUENCE: TaskStage[] = [
+  "queued:prioritize",
+  "queued:plan",
+  "queued:implement",
+  "queued:review",
+  "queued:merge",
+  "done",
+];
+
+export function nextStage(current: TaskStage): TaskStage | null {
+  const idx = STAGE_SEQUENCE.indexOf(current);
+  if (idx === -1 || idx >= STAGE_SEQUENCE.length - 1) return null;
+  return STAGE_SEQUENCE[idx + 1];
+}
+
+export function jobTypeForStage(stage: TaskStage): string | null {
+  const map: Partial<Record<TaskStage, string>> = {
+    "queued:prioritize": "prioritizer",
+    "queued:plan": "planner",
+    "queued:implement": "implementer",
+    "queued:review": "reviewer",
+    "queued:merge": "merger",
+  };
+  return map[stage] ?? null;
+}
+
+export function createTask(db: DatabaseSync, input: CreateTaskInput): Task {
   const id = randomUUID();
-  const path = createWorktree(project, id, input.description);
   const now = new Date().toISOString();
-
-  const deskIndex = resolveDeskIndex(db, preferredDeskIndex, now);
+  const priority = Math.min(5, Math.max(1, input.priority ?? 3));
 
   const task: Task = {
     id,
-    projectId: project.id,
+    projectId: input.projectId,
+    title: input.title,
     description: input.description,
-    mode: input.mode,
-    status: "running",
-    sessionId: null,
-    branchName: branchName(id, input.description),
-    worktreePath: path,
+    priority,
+    stage: "queued:prioritize",
+    status: "queued",
+    requiresHumanReview: input.requiresHumanReview ? 1 : 0,
+    reviewLoopCount: 0,
+    worktreePath: null,
+    branch: null,
     prUrl: null,
-    prError: null,
-    error: null,
-    worktreeRemoved: 0,
-    deskIndex,
+    source: input.source ?? "human",
+    githubIssueNumber: input.githubIssueNumber ?? null,
+    sessionId: null,
     pendingQuestion: null,
+    error: null,
     createdAt: now,
     updatedAt: now,
   };
 
   db.prepare(
-    `INSERT INTO tasks
-      (id, projectId, description, mode, status, sessionId, branchName, worktreePath, prUrl, prError, error, deskIndex, pendingQuestion, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO tasks (id, projectId, title, description, priority, stage, status, requiresHumanReview, reviewLoopCount, worktreePath, branch, prUrl, source, githubIssueNumber, sessionId, pendingQuestion, error, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     task.id,
     task.projectId,
+    task.title,
     task.description,
-    task.mode,
+    task.priority,
+    task.stage,
     task.status,
-    task.sessionId,
-    task.branchName,
+    task.requiresHumanReview,
+    task.reviewLoopCount,
     task.worktreePath,
+    task.branch,
     task.prUrl,
-    task.prError,
-    task.error,
-    task.deskIndex,
+    task.source,
+    task.githubIssueNumber,
+    task.sessionId,
     task.pendingQuestion,
+    task.error,
     task.createdAt,
     task.updatedAt
   );
 
   return task;
-}
-
-/** Creates a "draft" ticket: no worktree/branch/desk yet, just a record waiting in the "New" column. */
-export function createDraftTask(db: DatabaseSync, project: Project, input: CreateTaskInput): Task {
-  const id = randomUUID();
-  const now = new Date().toISOString();
-
-  const task: Task = {
-    id,
-    projectId: project.id,
-    description: input.description,
-    mode: input.mode,
-    status: "draft",
-    sessionId: null,
-    branchName: "",
-    worktreePath: "",
-    prUrl: null,
-    prError: null,
-    error: null,
-    worktreeRemoved: 0,
-    deskIndex: null,
-    pendingQuestion: null,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  db.prepare(
-    `INSERT INTO tasks
-      (id, projectId, description, mode, status, sessionId, branchName, worktreePath, prUrl, prError, error, deskIndex, pendingQuestion, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    task.id,
-    task.projectId,
-    task.description,
-    task.mode,
-    task.status,
-    task.sessionId,
-    task.branchName,
-    task.worktreePath,
-    task.prUrl,
-    task.prError,
-    task.error,
-    task.deskIndex,
-    task.pendingQuestion,
-    task.createdAt,
-    task.updatedAt
-  );
-
-  return task;
-}
-
-/** Moves a draft ticket into the "Todo" column: creates its worktree/branch and allocates a desk. */
-export function startTask(db: DatabaseSync, project: Project, task: Task, preferredDeskIndex?: number | null): Task {
-  const path = createWorktree(project, task.id, task.description);
-  const branch = branchName(task.id, task.description);
-  const now = new Date().toISOString();
-
-  // Prefer assigning to a requested worker's desk; otherwise prefer reusing
-  // the desk of an idle agent (a "done" task waiting in code review) over
-  // allocating a fresh one, so finished agents pick up new tickets instead
-  // of every ticket spawning its own agent/desk.
-  const deskIndex = resolveDeskIndex(db, preferredDeskIndex, now);
-
-  db.prepare(`UPDATE tasks SET branchName = ?, worktreePath = ?, deskIndex = ?, status = 'queued', updatedAt = ? WHERE id = ?`).run(
-    branch,
-    path,
-    deskIndex,
-    now,
-    task.id
-  );
-
-  return { ...task, branchName: branch, worktreePath: path, deskIndex, status: "queued", updatedAt: now };
-}
-
-/** Moves a "done" (in code review) ticket into the "Done" column. */
-export function closeTask(db: DatabaseSync, id: string): void {
-  db.prepare(`UPDATE tasks SET status = 'closed', updatedAt = ? WHERE id = ?`).run(new Date().toISOString(), id);
-}
-
-export function deleteTask(db: DatabaseSync, id: string): void {
-  db.prepare(`DELETE FROM transcript_entries WHERE taskId = ?`).run(id);
-  db.prepare(`DELETE FROM tasks WHERE id = ?`).run(id);
-}
-
-export function listTasks(db: DatabaseSync): Task[] {
-  const rows = db.prepare(`SELECT * FROM tasks ORDER BY createdAt ASC`).all();
-  return rows as unknown as Task[];
-}
-
-export function listTasksByProject(db: DatabaseSync, projectId: string): Task[] {
-  const rows = db.prepare(`SELECT * FROM tasks WHERE projectId = ? ORDER BY createdAt ASC`).all(projectId);
-  return rows as unknown as Task[];
 }
 
 export function getTask(db: DatabaseSync, id: string): Task | undefined {
-  const row = db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(id);
-  return row as Task | undefined;
+  return db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(id) as Task | undefined;
+}
+
+export function listTasks(
+  db: DatabaseSync,
+  filters?: { stage?: string; status?: string; projectId?: string }
+): Task[] {
+  let sql = `SELECT * FROM tasks WHERE 1=1`;
+  const params: unknown[] = [];
+
+  if (filters?.stage) {
+    sql += ` AND stage = ?`;
+    params.push(filters.stage);
+  }
+  if (filters?.status) {
+    sql += ` AND status = ?`;
+    params.push(filters.status);
+  }
+  if (filters?.projectId) {
+    sql += ` AND projectId = ?`;
+    params.push(filters.projectId);
+  }
+
+  sql += ` ORDER BY priority DESC, createdAt ASC`;
+
+  return db.prepare(sql).all(...params) as Task[];
 }
 
 export function setTaskStatus(db: DatabaseSync, id: string, status: TaskStatus): void {
-  db.prepare(`UPDATE tasks SET status = ?, updatedAt = ? WHERE id = ?`).run(status, new Date().toISOString(), id);
-}
-
-export function setTaskSessionId(db: DatabaseSync, id: string, sessionId: string): void {
-  db.prepare(`UPDATE tasks SET sessionId = ?, updatedAt = ? WHERE id = ?`).run(sessionId, new Date().toISOString(), id);
-}
-
-export function setTaskBlocked(db: DatabaseSync, id: string, question: string): void {
-  db.prepare(`UPDATE tasks SET status = 'blocked', pendingQuestion = ?, updatedAt = ? WHERE id = ?`).run(
-    question,
+  db.prepare(`UPDATE tasks SET status = ?, updatedAt = ? WHERE id = ?`).run(
+    status,
     new Date().toISOString(),
     id
   );
 }
 
-export function setTaskPrResult(db: DatabaseSync, id: string, result: { prUrl?: string; error?: string }): void {
-  db.prepare(`UPDATE tasks SET prUrl = ?, prError = ?, updatedAt = ? WHERE id = ?`).run(
-    result.prUrl ?? null,
-    result.error ?? null,
+export function setTaskStage(db: DatabaseSync, id: string, stage: TaskStage, status: TaskStatus = "queued"): void {
+  const now = new Date().toISOString();
+  db.prepare(`UPDATE tasks SET stage = ?, status = ?, updatedAt = ? WHERE id = ?`).run(
+    stage,
+    status,
+    now,
+    id
+  );
+}
+
+export function setTaskWorktree(db: DatabaseSync, id: string, worktreePath: string, branch: string): void {
+  db.prepare(`UPDATE tasks SET worktreePath = ?, branch = ?, updatedAt = ? WHERE id = ?`).run(
+    worktreePath,
+    branch,
+    new Date().toISOString(),
+    id
+  );
+}
+
+export function setTaskPrUrl(db: DatabaseSync, id: string, prUrl: string): void {
+  db.prepare(`UPDATE tasks SET prUrl = ?, updatedAt = ? WHERE id = ?`).run(
+    prUrl,
+    new Date().toISOString(),
+    id
+  );
+}
+
+export function advanceTaskStage(db: DatabaseSync, task: Task): Task | null {
+  const next = nextStage(task.stage);
+  if (!next) return null;
+
+  const now = new Date().toISOString();
+
+  if (next === "done") {
+    db.prepare(`UPDATE tasks SET stage = 'done', status = 'done', updatedAt = ? WHERE id = ?`).run(
+      now,
+      task.id
+    );
+    return getTask(db, task.id)!;
+  }
+
+  // If requires human review, pause at gate
+  const newStatus: TaskStatus = task.requiresHumanReview ? "awaiting_approval" : "queued";
+  db.prepare(`UPDATE tasks SET stage = ?, status = ?, updatedAt = ? WHERE id = ?`).run(
+    next,
+    newStatus,
+    now,
+    task.id
+  );
+
+  return getTask(db, task.id)!;
+}
+
+export function approveTaskStage(db: DatabaseSync, id: string): Task | null {
+  const task = getTask(db, id);
+  if (!task || task.status !== "awaiting_approval") return null;
+
+  db.prepare(`UPDATE tasks SET status = 'queued', updatedAt = ? WHERE id = ?`).run(
+    new Date().toISOString(),
+    id
+  );
+  return getTask(db, id)!;
+}
+
+export function loopTaskToImplement(db: DatabaseSync, id: string): Task | null {
+  const task = getTask(db, id);
+  if (!task) return null;
+
+  const maxLoops = 3;
+  const newLoopCount = task.reviewLoopCount + 1;
+
+  if (newLoopCount > maxLoops) {
+    db.prepare(`UPDATE tasks SET status = 'stuck', reviewLoopCount = ?, updatedAt = ? WHERE id = ?`).run(
+      newLoopCount,
+      new Date().toISOString(),
+      id
+    );
+    return getTask(db, id)!;
+  }
+
+  db.prepare(
+    `UPDATE tasks SET stage = 'queued:implement', status = 'queued', reviewLoopCount = ?, updatedAt = ? WHERE id = ?`
+  ).run(newLoopCount, new Date().toISOString(), id);
+  return getTask(db, id)!;
+}
+
+export function retryStuckTask(db: DatabaseSync, id: string): Task | null {
+  const task = getTask(db, id);
+  if (!task || task.status !== "stuck") return null;
+
+  db.prepare(
+    `UPDATE tasks SET status = 'queued', reviewLoopCount = 0, updatedAt = ? WHERE id = ?`
+  ).run(new Date().toISOString(), id);
+  return getTask(db, id)!;
+}
+
+export function deleteTask(db: DatabaseSync, id: string): void {
+  db.prepare(`DELETE FROM transcript_entries WHERE taskId = ?`).run(id);
+  db.prepare(`DELETE FROM task_stages WHERE taskId = ?`).run(id);
+  db.prepare(`UPDATE agents SET currentTaskId = NULL WHERE currentTaskId = ?`).run(id);
+  db.prepare(`DELETE FROM tasks WHERE id = ?`).run(id);
+}
+
+// --- Task stages ---
+
+export function createTaskStage(
+  db: DatabaseSync,
+  taskId: string,
+  stage: string,
+  agentId?: string,
+  model?: string
+): TaskStageRecord {
+  const id = randomUUID();
+  const now = new Date().toISOString();
+
+  const record: TaskStageRecord = {
+    id,
+    taskId,
+    stage,
+    agentId: agentId ?? null,
+    model: model ?? null,
+    status: "running",
+    sessionId: null,
+    xpAwarded: 0,
+    startedAt: now,
+    completedAt: null,
+  };
+
+  db.prepare(
+    `INSERT INTO task_stages (id, taskId, stage, agentId, model, status, sessionId, xpAwarded, startedAt, completedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    record.id,
+    record.taskId,
+    record.stage,
+    record.agentId,
+    record.model,
+    record.status,
+    record.sessionId,
+    record.xpAwarded,
+    record.startedAt,
+    record.completedAt
+  );
+
+  return record;
+}
+
+export function completeTaskStage(
+  db: DatabaseSync,
+  stageId: string,
+  status: "done" | "failed",
+  xpAwarded = 0
+): void {
+  db.prepare(
+    `UPDATE task_stages SET status = ?, xpAwarded = ?, completedAt = ? WHERE id = ?`
+  ).run(status, xpAwarded, new Date().toISOString(), stageId);
+}
+
+export function setTaskStageSessionId(db: DatabaseSync, stageId: string, sessionId: string): void {
+  db.prepare(`UPDATE task_stages SET sessionId = ? WHERE id = ?`).run(sessionId, stageId);
+}
+
+export function listTaskStages(db: DatabaseSync, taskId: string): TaskStageRecord[] {
+  return db
+    .prepare(`SELECT * FROM task_stages WHERE taskId = ? ORDER BY startedAt ASC`)
+    .all(taskId) as TaskStageRecord[];
+}
+
+// Map job type → queued stage name (job type "prioritizer" → stage "queued:prioritize")
+const JOB_TYPE_TO_STAGE: Record<string, TaskStage> = {
+  prioritizer: "queued:prioritize",
+  planner: "queued:plan",
+  implementer: "queued:implement",
+  reviewer: "queued:review",
+  merger: "queued:merge",
+};
+
+// Next queued task for a given job type + optional project scope
+export function nextQueuedTaskForJobType(
+  db: DatabaseSync,
+  jobType: string,
+  projectIds?: string[]
+): Task | undefined {
+  const stage = JOB_TYPE_TO_STAGE[jobType];
+  if (!stage) return undefined;
+
+  if (!projectIds || projectIds.length === 0) {
+    return db
+      .prepare(
+        `SELECT * FROM tasks WHERE stage = ? AND status = 'queued' ORDER BY priority DESC, createdAt ASC LIMIT 1`
+      )
+      .get(stage) as Task | undefined;
+  }
+
+  const placeholders = projectIds.map(() => "?").join(", ");
+  return db
+    .prepare(
+      `SELECT * FROM tasks WHERE stage = ? AND status = 'queued' AND projectId IN (${placeholders}) ORDER BY priority DESC, createdAt ASC LIMIT 1`
+    )
+    .get(stage, ...projectIds) as Task | undefined;
+}
+
+// ── Legacy helpers (kept for AgentRunner compat until Phase 2 rewrite) ──────
+
+export function setTaskSessionId(db: DatabaseSync, id: string, sessionId: string): void {
+  db.prepare(`UPDATE tasks SET sessionId = ?, updatedAt = ? WHERE id = ?`).run(
+    sessionId,
+    new Date().toISOString(),
+    id
+  );
+}
+
+export function setTaskBlocked(db: DatabaseSync, id: string, question: string): void {
+  db.prepare(
+    `UPDATE tasks SET status = 'blocked', pendingQuestion = ?, updatedAt = ? WHERE id = ?`
+  ).run(question, new Date().toISOString(), id);
+}
+
+export function clearTaskPendingQuestion(db: DatabaseSync, id: string, status: TaskStatus): void {
+  db.prepare(`UPDATE tasks SET status = ?, pendingQuestion = NULL, updatedAt = ? WHERE id = ?`).run(
+    status,
     new Date().toISOString(),
     id
   );
 }
 
 export function setTaskFailed(db: DatabaseSync, id: string, error: string): void {
-  db.prepare(`UPDATE tasks SET status = 'failed', error = ?, updatedAt = ? WHERE id = ?`).run(
+  db.prepare(`UPDATE tasks SET status = 'error', error = ?, updatedAt = ? WHERE id = ?`).run(
     error,
-    new Date().toISOString(),
-    id
-  );
-}
-
-export function setTaskWorktreeRemoved(db: DatabaseSync, id: string): void {
-  db.prepare(`UPDATE tasks SET worktreeRemoved = 1, updatedAt = ? WHERE id = ?`).run(new Date().toISOString(), id);
-}
-
-export function clearTaskPendingQuestion(db: DatabaseSync, id: string, status: TaskStatus): void {
-  db.prepare(`UPDATE tasks SET status = ?, pendingQuestion = NULL, updatedAt = ? WHERE id = ?`).run(
-    status,
     new Date().toISOString(),
     id
   );

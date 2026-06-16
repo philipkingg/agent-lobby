@@ -7,48 +7,43 @@ import type { WsEvent } from "./ws-events.js";
 
 function makeTask(db: ReturnType<typeof createDb>, worktreePath: string): Task {
   db.prepare(
-    `INSERT OR IGNORE INTO projects (id, name, path, defaultBranch, worktreesRoot, createdAt) VALUES (?, ?, ?, ?, ?, ?)`
+    `INSERT OR IGNORE INTO projects (id, name, path, defaultBranch, worktreesRoot, githubUrl, autoMerge, createdAt)
+     VALUES (?, ?, ?, ?, ?, NULL, 1, ?)`
   ).run("proj-1", "repo", "/tmp/repo", "main", "/tmp/repo-worktrees", new Date().toISOString());
 
+  const now = new Date().toISOString();
   const task: Task = {
     id: "task-1",
     projectId: "proj-1",
+    title: "interactive session",
     description: "interactive session",
-    mode: "pty",
+    priority: 3,
+    stage: "queued:implement",
     status: "running",
-    sessionId: null,
-    branchName: "agent/task-1",
+    requiresHumanReview: 0,
+    reviewLoopCount: 0,
     worktreePath,
+    branch: "agent/task-1",
     prUrl: null,
-    prError: null,
-    error: null,
-    worktreeRemoved: 0,
-    deskIndex: null,
+    source: "human",
+    githubIssueNumber: null,
+    sessionId: null,
     pendingQuestion: null,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    error: null,
+    createdAt: now,
+    updatedAt: now,
   };
 
   db.prepare(
     `INSERT INTO tasks
-      (id, projectId, description, mode, status, sessionId, branchName, worktreePath, prUrl, prError, error, deskIndex, pendingQuestion, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (id, projectId, title, description, priority, stage, status, requiresHumanReview, reviewLoopCount,
+       worktreePath, branch, prUrl, source, githubIssueNumber, sessionId, pendingQuestion, error, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    task.id,
-    task.projectId,
-    task.description,
-    task.mode,
-    task.status,
-    task.sessionId,
-    task.branchName,
-    task.worktreePath,
-    task.prUrl,
-    task.prError,
-    task.error,
-    task.deskIndex,
-    task.pendingQuestion,
-    task.createdAt,
-    task.updatedAt
+    task.id, task.projectId, task.title, task.description, task.priority, task.stage, task.status,
+    task.requiresHumanReview, task.reviewLoopCount, task.worktreePath, task.branch,
+    task.prUrl, task.source, task.githubIssueNumber, task.sessionId, task.pendingQuestion,
+    task.error, task.createdAt, task.updatedAt
   );
 
   return task;
