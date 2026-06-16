@@ -33,10 +33,17 @@ import {
 import { listTranscriptEntries } from "./transcripts.js";
 import { removeWorktree, WorktreeError } from "./worktrees.js";
 import type { WsEvent } from "./ws-events.js";
+import { PipelineRunner } from "./pipeline-runner.js";
+import { AgentScheduler } from "./scheduler.js";
 
 export type { GitExecFn };
 
-export function buildApp(db: DatabaseSync = createDb(), gitExecFn?: GitExecFn) {
+export function buildApp(
+  db: DatabaseSync = createDb(),
+  gitExecFn?: GitExecFn,
+  options: { autoStartScheduler?: boolean } = {}
+) {
+  const { autoStartScheduler = false } = options;
   const app = Fastify();
 
   // WebSocket subscriber map — channel key → set of sockets
@@ -49,8 +56,8 @@ export function buildApp(db: DatabaseSync = createDb(), gitExecFn?: GitExecFn) {
     for (const socket of sockets) socket.send(payload);
   };
 
-  // Expose broadcast for Phase 2 scheduler wiring
-  (app as unknown as { broadcast: typeof broadcast }).broadcast = broadcast;
+  const pipelineRunner = new PipelineRunner(db, broadcast);
+  const scheduler = new AgentScheduler(db, pipelineRunner, broadcast);
 
   app.register(websocketPlugin);
 
@@ -370,6 +377,23 @@ export function buildApp(db: DatabaseSync = createDb(), gitExecFn?: GitExecFn) {
     return db.prepare(`SELECT * FROM user_profile WHERE id = 1`).get();
   });
 
+  // ── Scheduler control ─────────────────────────────────────────────────────
+
+  app.post("/scheduler/start", async () => {
+    scheduler.start();
+    return { ok: true, status: "running" };
+  });
+
+  app.post("/scheduler/stop", async () => {
+    scheduler.stop();
+    return { ok: true, status: "stopped" };
+  });
+
+  app.post("/scheduler/tick", async () => {
+    await scheduler.tick();
+    return { ok: true };
+  });
+
   // ── Settings ──────────────────────────────────────────────────────────────
 
   app.get("/settings", async () => {
@@ -394,6 +418,10 @@ export function buildApp(db: DatabaseSync = createDb(), gitExecFn?: GitExecFn) {
 
     return { ok: true };
   });
+
+  if (autoStartScheduler) scheduler.start();
+
+  app.addHook("onClose", async () => scheduler.stop());
 
   return app;
 }

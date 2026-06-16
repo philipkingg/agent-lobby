@@ -4,7 +4,32 @@ This file tracks what has been built. Read it at the start of each new session f
 
 ---
 
-## Phase 1 — Foundation (Steps 1–4) [IN PROGRESS]
+## Phase 2 — Pipeline Execution (Steps 5–9) [DONE]
+
+**Goal:** Idle agents automatically pick tasks, run Claude SDK per stage with personality, advance stages, award XP.
+
+### What changed
+- `backend/src/xp-service.ts` — NEW. `awardStageXp(db, agentId, stage, priority, broadcast)` computes base XP per stage × priority multiplier, calls `addAgentXp`, broadcasts `agent:xp`. `awardUserXp(db, amount, broadcast)` updates `user_profile`, broadcasts `user:xp`. Level thresholds: `[0, 100, 250, 500, 1000, 2000, 5000, 10000]`.
+- `backend/src/stage-prompts.ts` — NEW. `buildStagePrompt(task, project, agent)` returns stage-specific prompt + appended personality traits. `detectReviewOutcome(resultText)` returns `"approve" | "request_changes" | "unknown"` by scanning for `APPROVE`/`REQUEST_CHANGES` keywords.
+- `backend/src/pipeline-runner.ts` — NEW. `PipelineRunner` class. `runStage(task, project, agent)`: creates `task_stages` record, streams SDK call with `agent.model` + stage prompt + personality, handles AskUser blocking, on success calls `onStageSuccess` (stage advance, XP award), on reviewer `REQUEST_CHANGES` calls `loopTaskToImplement`, awards `task:gate` event on human-review gate, frees agent (`currentTaskId = null`) on completion.
+- `backend/src/scheduler.ts` — NEW. `AgentScheduler` class. `tick()`: for each idle agent (no `currentTaskId`, not fired), find highest-priority queued task for matching stage + squad scope, claim task (`status="running"`, `agent.currentTaskId=taskId`), fire-and-forget `runStage`. Guards against concurrent ticks.
+- `backend/src/app.ts` — UPDATED. Imports `PipelineRunner`, `AgentScheduler`. Creates scheduler in `buildApp`. New endpoints: `POST /scheduler/start|stop|tick`. `autoStartScheduler` option (default false). `onClose` hook stops scheduler.
+
+### Key decisions
+- Scheduler fires-and-forgets `runStage` (task is claimed so no double-dispatch)
+- `onStageSuccess` re-fetches task from DB to avoid stale `requiresHumanReview` state
+- Reviewer REQUEST_CHANGES → `loopTaskToImplement`; APPROVE (or unknown) → `advanceTaskStage`
+- Scheduler defaults off (`autoStartScheduler: false`) so tests don't auto-start it
+
+### Still TODO (Phase 3)
+- Worktree-per-task with pipeline branch naming (Step 10)
+- Auto-merge with conditions (Step 11)
+- GitHub PR comment poller cron (Step 12)
+- GitHub issue ingestion cron (Step 13)
+
+---
+
+## Phase 1 — Foundation (Steps 1–4) [DONE]
 
 **Goal:** New DB schema + agent/squad/task pipeline APIs. No execution yet — agents queue tasks but don't run them until Phase 2.
 
