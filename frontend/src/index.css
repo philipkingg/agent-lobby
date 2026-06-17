@@ -45,10 +45,8 @@
 
 #root {
   width: 100%;
-  max-width: 1180px;
-  margin: 0 auto;
-  min-height: 100svh;
-  padding: 0 1.5rem;
+  height: 100vh;
+  overflow: hidden;
 }
 
 body {

@@ -208,14 +208,17 @@ function AgentSprite({ agent, task, targetPos, animKey, texCache, onClick }: Age
 
 // ── PixiScene — rendered inside the Pixi reconciler ───────────────────────────
 
+interface Viewport { x: number; y: number; zoom: number }
+
 interface PixiSceneProps {
   agents: GameAgent[]
   tasks: GameTask[]
   texCache: TexCache | null
   onSelectAgent: (id: string) => void
+  viewport: Viewport
 }
 
-function PixiScene({ agents, tasks, texCache, onSelectAgent }: PixiSceneProps) {
+function PixiScene({ agents, tasks, texCache, onSelectAgent, viewport }: PixiSceneProps) {
   const taskById = new Map(tasks.map((t) => [t.id, t]))
   const agentsByStation = new Map<string, string[]>()
   for (const sid of Object.keys(STATIONS)) agentsByStation.set(sid, [])
@@ -226,7 +229,7 @@ function PixiScene({ agents, tasks, texCache, onSelectAgent }: PixiSceneProps) {
   }
 
   return (
-    <>
+    <pixiContainer x={viewport.x} y={viewport.y} scale={viewport.zoom}>
       <pixiGraphics draw={drawFloor} />
       <pixiGraphics draw={drawStationBg} />
       <StationLabels />
@@ -248,7 +251,7 @@ function PixiScene({ agents, tasks, texCache, onSelectAgent }: PixiSceneProps) {
             />
           )
         })}
-    </>
+    </pixiContainer>
   )
 }
 
@@ -274,17 +277,64 @@ export default function OfficeCanvas({ agents, tasks, onSelectAgent }: OfficeCan
   const rootRef = useRef<PixiRoot | null>(null)
   const [isReady, setIsReady] = useState(false)
   const [texCache, setTexCache] = useState<TexCache | null>(null)
-  const [scale, setScale] = useState(1)
+  const [cssScale, setCssScale] = useState(1)
+  const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 })
+  const dragRef = useRef<{ active: boolean; moved: boolean; lastX: number; lastY: number }>({ active: false, moved: false, lastX: 0, lastY: 0 })
 
   useEffect(() => {
     const wrap = wrapRef.current
     if (!wrap) return
     const obs = new ResizeObserver(([entry]) => {
       const { width, height } = entry.contentRect
-      setScale(Math.min(width / CANVAS_W, height / CANVAS_H))
+      setCssScale(Math.min(width / CANVAS_W, height / CANVAS_H))
     })
     obs.observe(wrap)
     return () => obs.disconnect()
+  }, [])
+
+  // Wheel zoom — must be non-passive to call preventDefault
+  useEffect(() => {
+    const wrap = wrapRef.current
+    if (!wrap) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
+      setViewport((prev) => {
+        const newZoom = Math.max(0.25, Math.min(4, prev.zoom * factor))
+        const rect = wrap.getBoundingClientRect()
+        // Mouse in canvas pixel coords
+        const mx = (e.clientX - rect.left - rect.width / 2) / cssScale + CANVAS_W / 2
+        const my = (e.clientY - rect.top - rect.height / 2) / cssScale + CANVAS_H / 2
+        // World point under cursor stays fixed
+        const wx = (mx - prev.x) / prev.zoom
+        const wy = (my - prev.y) / prev.zoom
+        return { zoom: newZoom, x: mx - wx * newZoom, y: my - wy * newZoom }
+      })
+    }
+    wrap.addEventListener('wheel', onWheel, { passive: false })
+    return () => wrap.removeEventListener('wheel', onWheel)
+  }, [cssScale])
+
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    if (e.button !== 0) return
+    dragRef.current = { active: true, moved: false, lastX: e.clientX, lastY: e.clientY }
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+  }, [])
+
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragRef.current.active) return
+    const dx = (e.clientX - dragRef.current.lastX) / cssScale
+    const dy = (e.clientY - dragRef.current.lastY) / cssScale
+    const dist = Math.sqrt(dx * dx + dy * dy)
+    if (!dragRef.current.moved && dist < 3) return
+    dragRef.current.moved = true
+    dragRef.current.lastX = e.clientX
+    dragRef.current.lastY = e.clientY
+    setViewport((prev) => ({ ...prev, x: prev.x + dx, y: prev.y + dy }))
+  }, [cssScale])
+
+  const onPointerUp = useCallback(() => {
+    dragRef.current.active = false
   }, [])
 
   useEffect(() => {
@@ -313,17 +363,21 @@ export default function OfficeCanvas({ agents, tasks, onSelectAgent }: OfficeCan
     const root = rootRef.current
     if (!isReady || !root) return
     void root.render(
-      <PixiScene agents={agents} tasks={tasks} texCache={texCache} onSelectAgent={onSelectAgent} />,
+      <PixiScene agents={agents} tasks={tasks} texCache={texCache} onSelectAgent={onSelectAgent} viewport={viewport} />,
       APP_OPTIONS
     )
-  }, [isReady, agents, tasks, texCache, onSelectAgent])
+  }, [isReady, agents, tasks, texCache, onSelectAgent, viewport])
 
   return (
     <div
       ref={wrapRef}
-      style={{ flex: 1, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      style={{ flex: 1, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'grab' }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerLeave={onPointerUp}
     >
-      <div style={{ transform: `scale(${scale})`, transformOrigin: 'center center', lineHeight: 0 }}>
+      <div style={{ transform: `scale(${cssScale})`, transformOrigin: 'center center', lineHeight: 0 }}>
         <canvas ref={canvasRef} style={{ display: 'block', borderRadius: 10 }} />
       </div>
     </div>
