@@ -11,7 +11,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Project } from "./projects.js";
 import type { Task, TaskStatus } from "./tasks.js";
 import type { Agent } from "./agents.js";
-import { assignAgentTask } from "./agents.js";
+import { assignAgentTask, updateAgentStation } from "./agents.js";
 import {
   setTaskStatus,
   setTaskSessionId,
@@ -153,12 +153,19 @@ export class PipelineRunner {
         const question = findAskUserQuestion(msg);
         if (question) {
           setTaskBlocked(this.db, task.id, question);
+          updateAgentStation(this.db, agent.id, "meeting");
+          this.broadcast("global", { type: "agent:update", agentId: agent.id, station: "meeting", taskId: task.id });
           this.broadcast(`task:${task.id}`, { type: "status", status: "blocked", pendingQuestion: question });
 
           await this.waitForAnswer(task.id);
 
           if (this.stopRequested.has(task.id)) break;
 
+          // Walk back to work station after unblocking
+          const workStation = this.db
+            .prepare(`SELECT currentStation FROM agents WHERE id = ?`)
+            .get(agent.id) as { currentStation: string | null } | undefined;
+          const prevStation = workStation?.currentStation ?? null;
           clearTaskPendingQuestion(this.db, task.id, "running");
           this.broadcast(`task:${task.id}`, { type: "status", status: "running", pendingQuestion: null });
         }
@@ -171,6 +178,8 @@ export class PipelineRunner {
             setTaskStatus(this.db, task.id, "error");
             this.broadcast(`task:${task.id}`, { type: "status", status: "error" });
             assignAgentTask(this.db, agent.id, null);
+            updateAgentStation(this.db, agent.id, "relaxation");
+            this.broadcast("global", { type: "agent:update", agentId: agent.id, station: "relaxation", taskId: null });
             return;
           }
         }
@@ -192,6 +201,12 @@ export class PipelineRunner {
       this.controllers.delete(task.id);
       this.stopRequested.delete(task.id);
     }
+  }
+
+  private freeAgent(agentId: string, taskId: string): void {
+    assignAgentTask(this.db, agentId, null);
+    updateAgentStation(this.db, agentId, "relaxation");
+    this.broadcast("global", { type: "agent:update", agentId, station: "relaxation", taskId: null });
   }
 
   private async onStageSuccess(
@@ -217,14 +232,14 @@ export class PipelineRunner {
         } else {
           this.broadcast(`task:${freshTask.id}`, { type: "status", status: "queued", stage: "queued:implement" });
         }
-        assignAgentTask(this.db, agent.id, null);
+        this.freeAgent(agent.id, freshTask.id);
         return;
       }
     }
 
     // Advance to next stage (or done)
     const advanced = advanceTaskStage(this.db, freshTask);
-    assignAgentTask(this.db, agent.id, null);
+    this.freeAgent(agent.id, freshTask.id);
 
     if (!advanced) {
       setTaskStatus(this.db, freshTask.id, "done");

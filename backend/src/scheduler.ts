@@ -1,10 +1,18 @@
 import type { DatabaseSync } from "node:sqlite";
-import { listAgents } from "./agents.js";
-import { nextQueuedTaskForJobType, getTask, setTaskStatus } from "./tasks.js";
+import { listAgents, updateAgentStation } from "./agents.js";
+import { nextQueuedTaskForJobType, setTaskStatus } from "./tasks.js";
 import { getProject } from "./projects.js";
 import { agentCanWorkOnProject } from "./squads.js";
 import type { PipelineRunner } from "./pipeline-runner.js";
 import type { Broadcast } from "./ws-events.js";
+
+const STATION_FOR_JOB: Record<string, string> = {
+  prioritizer: "planning",
+  planner: "planning",
+  implementer: "desks",
+  reviewer: "pr-wall",
+  merger: "pr-wall",
+};
 
 export class AgentScheduler {
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -58,14 +66,19 @@ export class AgentScheduler {
         const project = getProject(this.db, task.projectId);
         if (!project) continue;
 
-        // Claim task
+        // Claim task + update station
+        const station = STATION_FOR_JOB[agent.jobType] ?? "relaxation";
         this.db.prepare(`UPDATE tasks SET status = 'running', updatedAt = ? WHERE id = ?`).run(
           new Date().toISOString(),
           task.id
         );
-        this.db.prepare(`UPDATE agents SET currentTaskId = ? WHERE id = ?`).run(task.id, agent.id);
+        this.db.prepare(`UPDATE agents SET currentTaskId = ?, currentStation = ? WHERE id = ?`).run(
+          task.id,
+          station,
+          agent.id
+        );
 
-        this.broadcast("global", { type: "agent:update", agentId: agent.id, station: null, taskId: task.id });
+        this.broadcast("global", { type: "agent:update", agentId: agent.id, station, taskId: task.id });
         this.broadcast(`task:${task.id}`, { type: "status", status: "running" });
 
         // Run stage async (fire-and-forget; task is claimed so scheduler won't re-pick)

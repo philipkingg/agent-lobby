@@ -4,6 +4,37 @@ This file tracks what has been built. Read it at the start of each new session f
 
 ---
 
+## Phase 4 — Office Canvas Frontend (Steps 14–19) [DONE]
+
+**Goal:** Full UI rewrite — pixel-art office with station zones, animated character sprites, walk animation, real-time game state.
+
+### What changed
+- `backend/src/pipeline-runner.ts` — Added `freeAgent(agentId, taskId)` private helper (calls `assignAgentTask(null)` + `updateAgentStation("relaxation")` + broadcasts `agent:update`). Replaced inline free-agent code in `onStageSuccess` with `this.freeAgent(...)`.
+- `backend/src/scheduler.ts` — `STATION_FOR_JOB` map assigns agents to station matching their jobType when they claim a task.
+- `frontend/src/office-layout.ts` — NEW. Defines canvas geometry (900×540), 5 station zones (planning, desks, meeting, relaxation, pr-wall) with absolute slot positions, per-station animation type, `getAgentSlot(agentId, stationId, agentsAtStation)` for stable slot assignment.
+- `frontend/src/useGameState.ts` — NEW. `useGameState()` hook: initial REST fetch of `/api/agents`, `/api/tasks`, `/api/profile`, `/api/projects`; WebSocket at `/ws/events` for real-time `agent:update`, `agent:xp`, `user:xp`, `status` events; auto-reconnect on disconnect.
+- `frontend/src/OfficeCanvas.tsx` — Full rewrite. PixiJS v8 + @pixi/react v8 canvas: floor checkerboard, station zone backgrounds (colored + labeled), per-agent `AgentSprite` with `AnimatedSprite` (LimeZu characters), walk lerp toward slot positions, direction-aware run animation (up/down rows), badge overlays (💬 blocked, 🚩 awaiting_approval, ⚠ stuck).
+- `frontend/src/App.tsx` — Full rewrite. Layout: top HUD (title + user XP bar + stats), canvas section, right panel with Agents/Tasks/Settings tabs. Agent panel: hire form + agent list + agent detail (XP bar, current task). Tasks panel: new task form + active/done task lists. Settings panel: scheduler start/stop, manual cron triggers.
+- `frontend/src/App.css` — Full rewrite. Responsive shell layout, HUD styles, XP bar, tab bar, agent/task row components, utility classes.
+
+### Key decisions
+- Walk animation: agent `visualPos` lerps toward `targetPos` per tick (4px/frame); `run` animation shown while distance > 2px
+- Sprite sheet: 16×16px frames, 3× scale (48px). Row 0 = facing south, row 1 = facing north.
+- Slot assignment: agents sorted by id for stability within each station → `slots[idx % slots.length]`
+- `pixiAnimatedSprite` ref callback calls `.play()` on mount; `useEffect` re-calls `.play()` when animation key changes (Pixi's textures setter stops the animation)
+- Agents with no `currentStation` are rendered in the relaxation zone
+
+### Still TODO (Phase 5 — UI Panels)
+- Agent detail side panel with transcript view
+- Task detail panel (transcript, respond-to-question UI)
+- Squad management panel
+- Awaiting-approval confirmation UI
+- Stuck task retry UI
+- Agent fire/hire UI polish
+- PR Wall display (merged PRs feed)
+
+---
+
 ## Phase 3 — Git Workflow (Steps 10–13) [DONE]
 
 **Goal:** Worktrees per task, GitHub PR comment polling, issue ingestion.
