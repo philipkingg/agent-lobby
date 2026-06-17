@@ -265,7 +265,11 @@ function TaskDetailPanel({ task, onClose, onRefresh }: { task: GameTask; onClose
   )
 }
 
-function SettingsTab({ onRefresh }: { onRefresh: () => void }) {
+function SettingsTab({ onRefresh, zoomSensitivity, onZoomSensitivity }: {
+  onRefresh: () => void
+  zoomSensitivity: number
+  onZoomSensitivity: (v: number) => void
+}) {
   const [loading, setLoading] = useState(false)
 
   const triggerIngest = async () => {
@@ -287,6 +291,18 @@ function SettingsTab({ onRefresh }: { onRefresh: () => void }) {
 
   return (
     <div className="settings-tab">
+      <h4>Canvas</h4>
+      <div className="settings-row" style={{ flexDirection: 'column', gap: '0.25rem' }}>
+        <label style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
+          Zoom sensitivity — {Math.round(zoomSensitivity * 100)}%
+        </label>
+        <input
+          type="range" min="0.01" max="0.4" step="0.01"
+          value={zoomSensitivity}
+          onChange={(e) => onZoomSensitivity(Number(e.target.value))}
+          style={{ width: '100%', accentColor: 'var(--accent)' }}
+        />
+      </div>
       <h4>Scheduler</h4>
       <div className="settings-row">
         <button onClick={startScheduler}>Start</button>
@@ -306,6 +322,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('agents')
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const [zoomSensitivity, setZoomSensitivity] = useState(0.08)
 
   const taskById = new Map(tasks.map((t) => [t.id, t]))
   const selectedAgent = selectedAgentId ? agents.find((a) => a.id === selectedAgentId) : null
@@ -339,6 +356,7 @@ export default function App() {
             setSelectedAgentId((prev) => (prev === id ? null : id))
             setTab('agents')
           }}
+          zoomSensitivity={zoomSensitivity}
         />
 
         {/* Right panel */}
@@ -425,7 +443,7 @@ export default function App() {
               </div>
             )}
 
-            {tab === 'settings' && <SettingsTab onRefresh={refetchAll} />}
+            {tab === 'settings' && <SettingsTab onRefresh={refetchAll} zoomSensitivity={zoomSensitivity} onZoomSensitivity={setZoomSensitivity} />}
           </div>
         </aside>
       </div>

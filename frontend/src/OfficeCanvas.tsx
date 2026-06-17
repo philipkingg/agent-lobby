@@ -37,7 +37,7 @@ function buildTexCache(entries: [string, Texture][]): TexCache {
   const cache: TexCache = new Map()
   for (const [url, baseTex] of entries) {
     baseTex.source.scaleMode = 'nearest'
-    const m = url.match(/characters\/(\w+)_(\w+)_16x16/)
+    const m = url.match(/characters\/(\w+?)_(\w+)_16x16/)
     if (!m) continue
     const [, avatar, animName] = m
     const cfg = ANIM_CONFIGS[animName as AnimKey]
@@ -257,55 +257,62 @@ function PixiScene({ agents, tasks, texCache, onSelectAgent, viewport }: PixiSce
 
 // ── OfficeCanvas — manages Pixi lifecycle ─────────────────────────────────────
 
-interface OfficeCanvasProps {
-  agents: GameAgent[]
-  tasks: GameTask[]
-  onSelectAgent: (agentId: string) => void
-}
-
-const APP_OPTIONS = {
-  width: CANVAS_W,
-  height: CANVAS_H,
+const BASE_APP_OPTIONS = {
   background: FLOOR_BG,
   resolution: window.devicePixelRatio || 1,
   autoDensity: true,
 }
 
-export default function OfficeCanvas({ agents, tasks, onSelectAgent }: OfficeCanvasProps) {
+interface OfficeCanvasProps {
+  agents: GameAgent[]
+  tasks: GameTask[]
+  onSelectAgent: (agentId: string) => void
+  zoomSensitivity?: number
+}
+
+export default function OfficeCanvas({ agents, tasks, onSelectAgent, zoomSensitivity = 0.08 }: OfficeCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const appRef = useRef<any>(null)
   const rootRef = useRef<PixiRoot | null>(null)
   const [isReady, setIsReady] = useState(false)
   const [texCache, setTexCache] = useState<TexCache | null>(null)
-  const [cssScale, setCssScale] = useState(1)
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 })
   const dragRef = useRef<{ active: boolean; moved: boolean; lastX: number; lastY: number }>({ active: false, moved: false, lastX: 0, lastY: 0 })
 
+  // Dynamically resize PixiJS renderer to fill container
   useEffect(() => {
     const wrap = wrapRef.current
     if (!wrap) return
     const obs = new ResizeObserver(([entry]) => {
       const { width, height } = entry.contentRect
-      setCssScale(Math.min(width / CANVAS_W, height / CANVAS_H))
+      const w = Math.round(width)
+      const h = Math.round(height)
+      if (w > 0 && h > 0 && appRef.current) {
+        appRef.current.renderer.resize(w, h)
+      }
     })
     obs.observe(wrap)
     return () => obs.disconnect()
   }, [])
 
-  // Wheel zoom — must be non-passive to call preventDefault
+  // Wheel zoom — non-passive to allow preventDefault
+  const sensitivityRef = useRef(zoomSensitivity)
+  sensitivityRef.current = zoomSensitivity
+
   useEffect(() => {
     const wrap = wrapRef.current
     if (!wrap) return
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
-      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
+      const s = sensitivityRef.current
+      const factor = e.deltaY < 0 ? (1 + s) : 1 / (1 + s)
       setViewport((prev) => {
-        const newZoom = Math.max(0.25, Math.min(4, prev.zoom * factor))
+        const newZoom = Math.max(0.15, Math.min(5, prev.zoom * factor))
         const rect = wrap.getBoundingClientRect()
-        // Mouse in canvas pixel coords
-        const mx = (e.clientX - rect.left - rect.width / 2) / cssScale + CANVAS_W / 2
-        const my = (e.clientY - rect.top - rect.height / 2) / cssScale + CANVAS_H / 2
-        // World point under cursor stays fixed
+        const mx = e.clientX - rect.left
+        const my = e.clientY - rect.top
         const wx = (mx - prev.x) / prev.zoom
         const wy = (my - prev.y) / prev.zoom
         return { zoom: newZoom, x: mx - wx * newZoom, y: my - wy * newZoom }
@@ -313,7 +320,7 @@ export default function OfficeCanvas({ agents, tasks, onSelectAgent }: OfficeCan
     }
     wrap.addEventListener('wheel', onWheel, { passive: false })
     return () => wrap.removeEventListener('wheel', onWheel)
-  }, [cssScale])
+  }, [])
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     if (e.button !== 0) return
@@ -323,30 +330,46 @@ export default function OfficeCanvas({ agents, tasks, onSelectAgent }: OfficeCan
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     if (!dragRef.current.active) return
-    const dx = (e.clientX - dragRef.current.lastX) / cssScale
-    const dy = (e.clientY - dragRef.current.lastY) / cssScale
+    const dx = e.clientX - dragRef.current.lastX
+    const dy = e.clientY - dragRef.current.lastY
     const dist = Math.sqrt(dx * dx + dy * dy)
     if (!dragRef.current.moved && dist < 3) return
     dragRef.current.moved = true
     dragRef.current.lastX = e.clientX
     dragRef.current.lastY = e.clientY
     setViewport((prev) => ({ ...prev, x: prev.x + dx, y: prev.y + dy }))
-  }, [cssScale])
+  }, [])
 
   const onPointerUp = useCallback(() => {
     dragRef.current.active = false
   }, [])
 
+  const handleZoomSlider = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setViewport((prev) => ({ ...prev, zoom: Number(e.target.value) }))
+  }, [])
+
+  const resetView = useCallback(() => {
+    setViewport({ x: 0, y: 0, zoom: 1 })
+  }, [])
+
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas) return
+    const wrap = wrapRef.current
+    if (!canvas || !wrap) return
+
+    const { width, height } = wrap.getBoundingClientRect()
+    const initW = Math.round(width) || CANVAS_W
+    const initH = Math.round(height) || CANVAS_H
 
     const root = createRoot(canvas, {
-      onInit: () => setIsReady(true)
+      onInit: (app) => {
+        appRef.current = app
+        setIsReady(true)
+      }
     })
     rootRef.current = root
 
-    void root.render(<></>, APP_OPTIONS)
+    void root.render(<></>, { ...BASE_APP_OPTIONS, width: initW, height: initH })
 
     void Promise.all(
       SPRITE_URLS.map((url) => Assets.load<Texture>(url).then((tex) => [url, tex] as [string, Texture]))
@@ -356,29 +379,59 @@ export default function OfficeCanvas({ agents, tasks, onSelectAgent }: OfficeCan
 
     return () => {
       rootRef.current = null
+      appRef.current = null
     }
   }, [])
 
   useEffect(() => {
     const root = rootRef.current
     if (!isReady || !root) return
+    const w = appRef.current?.renderer.width ?? CANVAS_W
+    const h = appRef.current?.renderer.height ?? CANVAS_H
     void root.render(
       <PixiScene agents={agents} tasks={tasks} texCache={texCache} onSelectAgent={onSelectAgent} viewport={viewport} />,
-      APP_OPTIONS
+      { ...BASE_APP_OPTIONS, width: w, height: h }
     )
   }, [isReady, agents, tasks, texCache, onSelectAgent, viewport])
 
   return (
     <div
       ref={wrapRef}
-      style={{ flex: 1, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'grab' }}
+      style={{ flex: 1, overflow: 'hidden', position: 'relative', cursor: 'grab' }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerLeave={onPointerUp}
     >
-      <div style={{ transform: `scale(${cssScale})`, transformOrigin: 'center center', lineHeight: 0 }}>
-        <canvas ref={canvasRef} style={{ display: 'block', borderRadius: 10 }} />
+      <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: '100%' }} />
+      {/* Zoom controls overlay */}
+      <div style={{
+        position: 'absolute', bottom: 12, left: 12,
+        display: 'flex', alignItems: 'center', gap: 6,
+        background: 'rgba(16,13,10,0.82)', border: '1px solid var(--border)',
+        borderRadius: 8, padding: '4px 8px', backdropFilter: 'blur(4px)',
+      }}>
+        <button
+          style={{ padding: '2px 7px', fontSize: '1rem', lineHeight: 1, minWidth: 0 }}
+          onClick={() => setViewport((p) => ({ ...p, zoom: Math.max(0.15, p.zoom / (1 + sensitivityRef.current * 3)) }))}
+        >−</button>
+        <input
+          type="range" min="0.15" max="5" step="0.01"
+          value={viewport.zoom}
+          onChange={handleZoomSlider}
+          style={{ width: 90, cursor: 'pointer', accentColor: 'var(--accent)' }}
+        />
+        <button
+          style={{ padding: '2px 7px', fontSize: '1rem', lineHeight: 1, minWidth: 0 }}
+          onClick={() => setViewport((p) => ({ ...p, zoom: Math.min(5, p.zoom * (1 + sensitivityRef.current * 3)) }))}
+        >+</button>
+        <span style={{ fontSize: '0.68rem', fontFamily: 'var(--mono)', color: 'var(--text-dim)', minWidth: 32 }}>
+          {Math.round(viewport.zoom * 100)}%
+        </span>
+        <button
+          style={{ padding: '2px 6px', fontSize: '0.68rem', lineHeight: 1, minWidth: 0, color: 'var(--text-dim)' }}
+          onClick={resetView}
+        >↺</button>
       </div>
     </div>
   )
