@@ -89,4 +89,4 @@ cd frontend && npm run build && npm test
 
 ## License
 
-MIT
+MIT :)
