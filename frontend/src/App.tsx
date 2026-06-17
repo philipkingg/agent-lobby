@@ -4,7 +4,7 @@ import OfficeCanvas from './OfficeCanvas'
 import { useGameState } from './useGameState'
 import type { GameAgent, GameTask, Project } from './useGameState'
 
-type Tab = 'agents' | 'tasks' | 'settings'
+type Tab = 'agents' | 'tasks' | 'pr-wall' | 'settings'
 
 const STAGE_LABELS: Record<string, string> = {
   'queued:prioritize': 'Prioritize',
@@ -158,6 +158,148 @@ function NewTaskPanel({ projects, onCreated }: { projects: Project[]; onCreated:
         {loading ? 'Creating…' : 'Create Task'}
       </button>
     </form>
+  )
+}
+
+// ── Transcript helpers ──────────────────────────────────────────────────────
+
+interface TranscriptEntry { id: string; type: string; content: string; timestamp: string }
+
+function extractText(entry: TranscriptEntry): string | null {
+  try {
+    const msg = JSON.parse(entry.content) as Record<string, unknown>
+    if (entry.type === 'assistant') {
+      const message = msg.message as { content?: Array<{ type: string; text?: string }> } | undefined
+      const texts = (message?.content ?? [])
+        .filter((b) => b.type === 'text' && b.text)
+        .map((b) => b.text!)
+      return texts.join('\n').trim() || null
+    }
+    if (entry.type === 'result') {
+      const result = (msg.result as string | undefined) ?? ''
+      return result.trim() || null
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+function TranscriptView({ taskId }: { taskId: string }) {
+  const [entries, setEntries] = useState<TranscriptEntry[]>([])
+
+  useEffect(() => {
+    fetch(`/api/tasks/${taskId}/transcript`)
+      .then((r) => r.ok ? r.json() : Promise.reject())
+      .then(setEntries)
+      .catch(() => {})
+  }, [taskId])
+
+  const lines = entries.map((e) => ({ text: extractText(e), type: e.type })).filter((l) => l.text)
+
+  if (lines.length === 0) return <p className="dim" style={{ fontSize: '0.75rem' }}>No transcript yet.</p>
+
+  return (
+    <div className="transcript">
+      {lines.map((l, i) => (
+        <div key={i} className={`transcript-line transcript-${l.type}`}>
+          <span className="transcript-tag">{l.type === 'result' ? 'DONE' : 'AI'}</span>
+          <span className="transcript-text">{l.text}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Agent detail with transcript ─────────────────────────────────────────────
+
+function AgentDetailPanel({ agent, task, onFire, onClose }: {
+  agent: GameAgent
+  task: GameTask | null
+  onFire: () => void
+  onClose: () => void
+}) {
+  const [showTranscript, setShowTranscript] = useState(false)
+  const [firing, setFiring] = useState(false)
+
+  const fire = async () => {
+    if (!confirm(`Fire ${agent.name}?`)) return
+    setFiring(true)
+    await fetch(`/api/agents/${agent.id}`, { method: 'DELETE' })
+    setFiring(false)
+    onFire()
+    onClose()
+  }
+
+  return (
+    <div className="agent-detail">
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.4rem' }}>
+        <div style={{ flex: 1 }}>
+          <h4>{agent.name}</h4>
+          <p className="dim">{agent.jobType} · Level {agent.level}</p>
+        </div>
+        <button
+          onClick={fire}
+          disabled={firing}
+          style={{ fontSize: '0.7rem', color: 'var(--danger)', borderColor: 'var(--danger)', padding: '2px 8px' }}
+        >
+          {firing ? '…' : 'Fire'}
+        </button>
+        <button className="close-btn" onClick={onClose}>×</button>
+      </div>
+      <XpBar xp={agent.xp} level={agent.level} maxXp={xpToNextLevel(agent.level)} />
+      {task && (
+        <div className="agent-task-info">
+          <span className="dim">Working on:</span>
+          <span>{task.title}</span>
+          <span className="dim">{STAGE_LABELS[task.stage] ?? task.stage}</span>
+        </div>
+      )}
+      {!task && <p className="dim" style={{ fontSize: '0.78rem' }}>Idle</p>}
+      {task && (
+        <button
+          style={{ fontSize: '0.72rem', padding: '3px 8px', marginTop: '0.25rem' }}
+          onClick={() => setShowTranscript((p) => !p)}
+        >
+          {showTranscript ? 'Hide' : 'Show'} transcript
+        </button>
+      )}
+      {showTranscript && task && <TranscriptView taskId={task.id} />}
+    </div>
+  )
+}
+
+// ── PR Wall ───────────────────────────────────────────────────────────────────
+
+function PrWallTab({ tasks }: { tasks: GameTask[] }) {
+  const merged = tasks.filter((t) => t.status === 'done' && (t as GameTask & { prUrl?: string | null }).prUrl)
+  const done = tasks.filter((t) => t.status === 'done')
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      {merged.length === 0 && done.length === 0 && <p className="dim">No completed tasks yet.</p>}
+      {merged.length === 0 && done.length > 0 && <p className="dim">No PRs merged yet.</p>}
+      {merged.map((t) => {
+        const prUrl = (t as GameTask & { prUrl: string }).prUrl
+        return (
+          <div key={t.id} className="pr-card">
+            <span className="pr-title">{t.title}</span>
+            <a href={prUrl} target="_blank" rel="noopener noreferrer" className="pr-link">View PR →</a>
+          </div>
+        )
+      })}
+      {done.length > 0 && (
+        <>
+          <p className="list-header">All done ({done.length})</p>
+          {done.map((t) => (
+            <div key={t.id} className="pr-card pr-card-done">
+              <span className="pr-title">{t.title}</span>
+              <span className="dim" style={{ fontSize: '0.7rem' }}>{STAGE_LABELS[t.stage] ?? t.stage}</span>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
   )
 }
 
@@ -364,6 +506,7 @@ export default function App() {
           <div className="tab-bar">
             <button className={tab === 'agents' ? 'tab active' : 'tab'} onClick={() => setTab('agents')}>Agents</button>
             <button className={tab === 'tasks' ? 'tab active' : 'tab'} onClick={() => setTab('tasks')}>Tasks</button>
+            <button className={tab === 'pr-wall' ? 'tab active' : 'tab'} onClick={() => setTab('pr-wall')}>PRs</button>
             <button className={tab === 'settings' ? 'tab active' : 'tab'} onClick={() => setTab('settings')}>Settings</button>
           </div>
 
@@ -384,23 +527,12 @@ export default function App() {
                 </div>
 
                 {selectedAgent && (
-                  <div className="agent-detail">
-                    <h4>{selectedAgent.name}</h4>
-                    <p className="dim">{selectedAgent.jobType} · Level {selectedAgent.level}</p>
-                    <XpBar
-                      xp={selectedAgent.xp}
-                      level={selectedAgent.level}
-                      maxXp={xpToNextLevel(selectedAgent.level)}
-                    />
-                    {selectedTask && (
-                      <div className="agent-task-info">
-                        <span className="dim">Working on:</span>
-                        <span>{selectedTask.title}</span>
-                        <span className="dim">{STAGE_LABELS[selectedTask.stage] ?? selectedTask.stage}</span>
-                      </div>
-                    )}
-                    {selectedAgent.currentStation === null && <p className="dim">Idle in relaxation area</p>}
-                  </div>
+                  <AgentDetailPanel
+                    agent={selectedAgent}
+                    task={selectedTask ?? null}
+                    onFire={refetchAgents}
+                    onClose={() => setSelectedAgentId(null)}
+                  />
                 )}
               </div>
             )}
@@ -442,6 +574,8 @@ export default function App() {
                 )}
               </div>
             )}
+
+            {tab === 'pr-wall' && <PrWallTab tasks={tasks} />}
 
             {tab === 'settings' && <SettingsTab onRefresh={refetchAll} zoomSensitivity={zoomSensitivity} onZoomSensitivity={setZoomSensitivity} />}
           </div>
