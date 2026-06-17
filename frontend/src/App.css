@@ -531,6 +531,34 @@
 .stage-running { color: var(--accent); }
 .stage-failed { color: var(--danger); }
 
+/* ── Project rows ── */
+
+.project-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+}
+
+.project-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-h);
+  display: block;
+}
+
+.project-path {
+  font-size: 0.65rem;
+  font-family: var(--mono);
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ── Settings tab ── */
 
 .settings-tab {
