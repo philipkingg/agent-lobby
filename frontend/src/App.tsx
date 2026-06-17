@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import './App.css'
 import OfficeCanvas from './OfficeCanvas'
 import { useGameState } from './useGameState'
@@ -161,6 +161,110 @@ function NewTaskPanel({ projects, onCreated }: { projects: Project[]; onCreated:
   )
 }
 
+interface TaskStage {
+  id: string; taskId: string; stage: string; agentId: string; model: string
+  status: string; startedAt: string; completedAt: string | null
+}
+
+function TaskDetailPanel({ task, onClose, onRefresh }: { task: GameTask; onClose: () => void; onRefresh: () => void }) {
+  const [stages, setStages] = useState<TaskStage[]>([])
+  const [answer, setAnswer] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    fetch(`/api/tasks/${task.id}/stages`)
+      .then((r) => r.ok ? r.json() : Promise.reject())
+      .then(setStages)
+      .catch(() => {})
+  }, [task.id, task.status])
+
+  const respond = async () => {
+    if (!answer.trim()) return
+    setLoading(true)
+    await fetch(`/api/tasks/${task.id}/answer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answer }),
+    })
+    setAnswer('')
+    setLoading(false)
+    onRefresh()
+  }
+
+  const approve = async () => {
+    setLoading(true)
+    await fetch(`/api/tasks/${task.id}/approve`, { method: 'POST' })
+    setLoading(false)
+    onRefresh()
+  }
+
+  const retry = async () => {
+    setLoading(true)
+    await fetch(`/api/tasks/${task.id}/retry`, { method: 'POST' })
+    setLoading(false)
+    onRefresh()
+  }
+
+  const color = STATUS_COLOR[task.status] ?? '#666'
+
+  return (
+    <div className="task-detail">
+      <div className="task-detail-header">
+        <span className="task-detail-title">{task.title}</span>
+        <button className="close-btn" onClick={onClose}>×</button>
+      </div>
+      <div className="task-detail-meta">
+        <span style={{ color }}>{task.status}</span>
+        <span className="dim">{STAGE_LABELS[task.stage] ?? task.stage}</span>
+        <span className="dim">P{task.priority}</span>
+      </div>
+
+      {task.status === 'blocked' && task.pendingQuestion && (
+        <div className="task-question-box">
+          <p className="dim" style={{ margin: '0 0 0.4rem', fontSize: '0.78rem' }}>Agent asks:</p>
+          <p style={{ margin: '0 0 0.6rem', fontSize: '0.84rem', color: 'var(--text-h)' }}>{task.pendingQuestion}</p>
+          <textarea
+            value={answer}
+            onChange={(e) => setAnswer(e.target.value)}
+            placeholder="Your answer…"
+            rows={3}
+            style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'var(--sans)', lineHeight: 1.4 }}
+          />
+          <button className="btn-primary" onClick={respond} disabled={loading || !answer.trim()}>
+            {loading ? 'Sending…' : 'Send Answer'}
+          </button>
+        </div>
+      )}
+
+      {task.status === 'awaiting_approval' && (
+        <div className="task-action-row">
+          <button className="btn-primary" onClick={approve} disabled={loading}>
+            {loading ? '…' : 'Approve'}
+          </button>
+        </div>
+      )}
+
+      {task.status === 'stuck' && (
+        <div className="task-action-row">
+          <button onClick={retry} disabled={loading}>{loading ? '…' : 'Retry'}</button>
+        </div>
+      )}
+
+      {stages.length > 0 && (
+        <div className="task-stages">
+          <p className="list-header" style={{ margin: '0.5rem 0 0.25rem' }}>Stage History</p>
+          {stages.map((s) => (
+            <div key={s.id} className="stage-row">
+              <span className="stage-name">{STAGE_LABELS[s.stage] ?? s.stage}</span>
+              <span className={`stage-status stage-${s.status}`}>{s.status}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SettingsTab({ onRefresh }: { onRefresh: () => void }) {
   const [loading, setLoading] = useState(false)
 
@@ -201,10 +305,12 @@ export default function App() {
   const { agents, tasks, userProfile, projects, refetchAgents, refetchTasks, refetchAll } = useGameState()
   const [tab, setTab] = useState<Tab>('agents')
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
 
   const taskById = new Map(tasks.map((t) => [t.id, t]))
   const selectedAgent = selectedAgentId ? agents.find((a) => a.id === selectedAgentId) : null
   const selectedTask = selectedAgent?.currentTaskId ? taskById.get(selectedAgent.currentTaskId) : null
+  const selectedTaskDetail = selectedTaskId ? taskById.get(selectedTaskId) : null
   const maxXp = userProfile?.xpToNext ?? xpToNextLevel(userProfile?.level ?? 1)
 
   const activeTasks = tasks.filter((t) => t.status !== 'done')
@@ -226,17 +332,14 @@ export default function App() {
 
       {/* Main layout */}
       <div className="main-layout">
-        {/* Canvas */}
-        <div className="canvas-wrap">
-          <OfficeCanvas
-            agents={agents}
-            tasks={tasks}
-            onSelectAgent={(id) => {
-              setSelectedAgentId((prev) => (prev === id ? null : id))
-              setTab('agents')
-            }}
-          />
-        </div>
+        <OfficeCanvas
+          agents={agents}
+          tasks={tasks}
+          onSelectAgent={(id) => {
+            setSelectedAgentId((prev) => (prev === id ? null : id))
+            setTab('agents')
+          }}
+        />
 
         {/* Right panel */}
         <aside className="right-panel">
@@ -286,21 +389,39 @@ export default function App() {
 
             {tab === 'tasks' && (
               <div className="tasks-tab">
-                <NewTaskPanel projects={projects} onCreated={refetchTasks} />
-                <div className="task-list">
-                  <p className="list-header">Active ({activeTasks.length})</p>
-                  {activeTasks.map((t) => (
-                    <TaskRow key={t.id} task={t} onClick={() => {}} />
-                  ))}
-                  {doneTasks.length > 0 && (
-                    <>
-                      <p className="list-header">Done ({doneTasks.length})</p>
-                      {doneTasks.slice(0, 10).map((t) => (
-                        <TaskRow key={t.id} task={t} onClick={() => {}} />
+                {selectedTaskDetail ? (
+                  <TaskDetailPanel
+                    task={selectedTaskDetail}
+                    onClose={() => setSelectedTaskId(null)}
+                    onRefresh={refetchTasks}
+                  />
+                ) : (
+                  <>
+                    <NewTaskPanel projects={projects} onCreated={refetchTasks} />
+                    <div className="task-list">
+                      <p className="list-header">Active ({activeTasks.length})</p>
+                      {activeTasks.map((t) => (
+                        <TaskRow
+                          key={t.id}
+                          task={t}
+                          onClick={() => { setSelectedTaskId(t.id); }}
+                        />
                       ))}
-                    </>
-                  )}
-                </div>
+                      {doneTasks.length > 0 && (
+                        <>
+                          <p className="list-header">Done ({doneTasks.length})</p>
+                          {doneTasks.slice(0, 10).map((t) => (
+                            <TaskRow
+                              key={t.id}
+                              task={t}
+                              onClick={() => { setSelectedTaskId(t.id); }}
+                            />
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             )}
 

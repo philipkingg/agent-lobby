@@ -331,6 +331,17 @@ export function buildApp(
     return updated;
   });
 
+  app.post("/tasks/:id/answer", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { answer } = request.body as { answer?: string };
+    if (!answer?.trim()) return reply.code(400).send({ error: "answer required" });
+    const task = getTask(db, id);
+    if (!task) return reply.code(404).send({ error: "task not found" });
+    if (task.status !== "blocked") return reply.code(409).send({ error: "task is not blocked" });
+    const ok = pipelineRunner.respond(id, answer.trim());
+    return { ok };
+  });
+
   app.delete("/tasks/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     const task = getTask(db, id);

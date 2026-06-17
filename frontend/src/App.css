@@ -92,18 +92,9 @@
 
 .canvas-wrap {
   flex: 1;
-  overflow: auto;
+  overflow: hidden;
   display: flex;
-  align-items: flex-start;
-  justify-content: flex-start;
-  padding: 1rem;
   min-width: 0;
-}
-
-.canvas-wrap canvas {
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  display: block;
 }
 
 /* ── Right panel ── */
@@ -352,6 +343,95 @@
   font-family: var(--mono);
   white-space: nowrap;
 }
+
+/* ── Task detail ── */
+
+.task-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.task-detail-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.task-detail-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-h);
+  flex: 1;
+  line-height: 1.3;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.close-btn:hover {
+  color: var(--text);
+}
+
+.task-detail-meta {
+  display: flex;
+  gap: 0.6rem;
+  font-size: 0.75rem;
+  font-family: var(--mono);
+}
+
+.task-question-box {
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.task-action-row {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.task-stages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.stage-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.3rem 0.5rem;
+  background: var(--bg-sunken);
+  border-radius: 5px;
+  font-size: 0.75rem;
+}
+
+.stage-name {
+  color: var(--text);
+  font-family: var(--mono);
+}
+
+.stage-status {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+}
+
+.stage-completed { color: var(--success); }
+.stage-running { color: var(--accent); }
+.stage-failed { color: var(--danger); }
 
 /* ── Settings tab ── */
 

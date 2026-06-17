@@ -260,13 +260,32 @@ interface OfficeCanvasProps {
   onSelectAgent: (agentId: string) => void
 }
 
-const APP_OPTIONS = { width: CANVAS_W, height: CANVAS_H, background: FLOOR_BG }
+const APP_OPTIONS = {
+  width: CANVAS_W,
+  height: CANVAS_H,
+  background: FLOOR_BG,
+  resolution: window.devicePixelRatio || 1,
+  autoDensity: true,
+}
 
 export default function OfficeCanvas({ agents, tasks, onSelectAgent }: OfficeCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
   const rootRef = useRef<PixiRoot | null>(null)
   const [isReady, setIsReady] = useState(false)
   const [texCache, setTexCache] = useState<TexCache | null>(null)
+  const [scale, setScale] = useState(1)
+
+  useEffect(() => {
+    const wrap = wrapRef.current
+    if (!wrap) return
+    const obs = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect
+      setScale(Math.min(width / CANVAS_W, height / CANVAS_H))
+    })
+    obs.observe(wrap)
+    return () => obs.disconnect()
+  }, [])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -300,8 +319,13 @@ export default function OfficeCanvas({ agents, tasks, onSelectAgent }: OfficeCan
   }, [isReady, agents, tasks, texCache, onSelectAgent])
 
   return (
-    <div style={{ position: 'relative' }}>
-      <canvas ref={canvasRef} style={{ display: 'block' }} />
+    <div
+      ref={wrapRef}
+      style={{ flex: 1, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+    >
+      <div style={{ transform: `scale(${scale})`, transformOrigin: 'center center', lineHeight: 0 }}>
+        <canvas ref={canvasRef} style={{ display: 'block', borderRadius: 10 }} />
+      </div>
     </div>
   )
 }
