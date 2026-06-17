@@ -205,6 +205,15 @@ export function setTaskPrUrl(db: DatabaseSync, id: string, prUrl: string): void 
   );
 }
 
+export function setTaskPriority(db: DatabaseSync, id: string, priority: number): void {
+  const clamped = Math.min(5, Math.max(1, Math.round(priority)));
+  db.prepare(`UPDATE tasks SET priority = ?, updatedAt = ? WHERE id = ?`).run(
+    clamped,
+    new Date().toISOString(),
+    id
+  );
+}
+
 export function advanceTaskStage(db: DatabaseSync, task: Task): Task | null {
   const next = nextStage(task.stage);
   if (!next) return null;

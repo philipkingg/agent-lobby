@@ -23,6 +23,8 @@ import {
   createTaskStage,
   completeTaskStage,
   getTask,
+  setTaskPriority,
+  setTaskPrUrl,
 } from "./tasks.js";
 import { addTranscriptEntry } from "./transcripts.js";
 import type { Broadcast } from "./ws-events.js";
@@ -217,6 +219,20 @@ export class PipelineRunner {
   ): Promise<void> {
     // Re-fetch task to get latest state (e.g. requiresHumanReview may have changed)
     const freshTask = getTask(this.db, task.id) ?? task;
+
+    // Merge stage: extract PR URL from result text
+    if (freshTask.stage === "queued:merge") {
+      const urlMatch = resultText.match(/https:\/\/github\.com\/[^\s)]+\/pull\/\d+/);
+      if (urlMatch) setTaskPrUrl(this.db, freshTask.id, urlMatch[0]);
+    }
+
+    // Prioritize stage: parse PRIORITY: N from result and update task
+    if (freshTask.stage === "queued:prioritize") {
+      const match = resultText.match(/PRIORITY:\s*([1-5])/i);
+      if (match) {
+        setTaskPriority(this.db, freshTask.id, parseInt(match[1], 10));
+      }
+    }
 
     // Award XP to the agent for completing this stage
     awardStageXp(this.db, agent.id, freshTask.stage, freshTask.priority, this.broadcast);

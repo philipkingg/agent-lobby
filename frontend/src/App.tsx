@@ -213,6 +213,17 @@ function TranscriptView({ taskId }: { taskId: string }) {
 
 // ── Agent detail with transcript ─────────────────────────────────────────────
 
+function parseTraits(personalityJson: string): string[] {
+  try {
+    const p = JSON.parse(personalityJson) as { traits?: Array<{ name: string }> }
+    return p.traits?.map((t) => t.name) ?? []
+  } catch {
+    return []
+  }
+}
+
+const LEVEL_TITLES = ['Rookie', 'Junior', 'Mid', 'Senior', 'Staff', 'Principal', 'Legend']
+
 function AgentDetailPanel({ agent, task, onFire, onClose }: {
   agent: GameAgent
   task: GameTask | null
@@ -221,6 +232,8 @@ function AgentDetailPanel({ agent, task, onFire, onClose }: {
 }) {
   const [showTranscript, setShowTranscript] = useState(false)
   const [firing, setFiring] = useState(false)
+  const traits = parseTraits(agent.personality)
+  const levelTitle = LEVEL_TITLES[Math.min(agent.level - 1, LEVEL_TITLES.length - 1)]
 
   const fire = async () => {
     if (!confirm(`Fire ${agent.name}?`)) return
@@ -236,7 +249,7 @@ function AgentDetailPanel({ agent, task, onFire, onClose }: {
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.4rem' }}>
         <div style={{ flex: 1 }}>
           <h4>{agent.name}</h4>
-          <p className="dim">{agent.jobType} · Level {agent.level}</p>
+          <p className="dim" style={{ fontSize: '0.75rem' }}>{agent.jobType} · {levelTitle} (Lv {agent.level})</p>
         </div>
         <button
           onClick={fire}
@@ -248,6 +261,11 @@ function AgentDetailPanel({ agent, task, onFire, onClose }: {
         <button className="close-btn" onClick={onClose}>×</button>
       </div>
       <XpBar xp={agent.xp} level={agent.level} maxXp={xpToNextLevel(agent.level)} />
+      {traits.length > 0 && (
+        <div className="trait-list">
+          {traits.map((t) => <span key={t} className="trait-pill">{t}</span>)}
+        </div>
+      )}
       {task && (
         <div className="agent-task-info">
           <span className="dim">Working on:</span>
