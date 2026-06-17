@@ -67,25 +67,25 @@ export function useGameState(): GameState {
 
   const fetchAgents = () =>
     fetch('/api/agents')
-      .then((r) => r.json())
+      .then((r) => r.ok ? r.json() : Promise.reject())
       .then(setAgents)
       .catch(() => {})
 
   const fetchTasks = () =>
     fetch('/api/tasks')
-      .then((r) => r.json())
+      .then((r) => r.ok ? r.json() : Promise.reject())
       .then(setTasks)
       .catch(() => {})
 
   const fetchProfile = () =>
     fetch('/api/profile')
-      .then((r) => r.json())
+      .then((r) => r.ok ? r.json() : Promise.reject())
       .then(setUserProfile)
       .catch(() => {})
 
   const fetchProjects = () =>
     fetch('/api/projects')
-      .then((r) => r.json())
+      .then((r) => r.ok ? r.json() : Promise.reject())
       .then(setProjects)
       .catch(() => {})
 
