@@ -365,12 +365,28 @@ function TaskDetailPanel({ task, onClose, onRefresh }: { task: GameTask; onClose
     onRefresh()
   }
 
+  const deleteTask = async () => {
+    if (!confirm(`Delete "${task.title}"?`)) return
+    setLoading(true)
+    await fetch(`/api/tasks/${task.id}`, { method: 'DELETE' })
+    setLoading(false)
+    onRefresh()
+    onClose()
+  }
+
   const color = STATUS_COLOR[task.status] ?? '#666'
 
   return (
     <div className="task-detail">
       <div className="task-detail-header">
         <span className="task-detail-title">{task.title}</span>
+        <button
+          onClick={deleteTask}
+          disabled={loading}
+          style={{ fontSize: '0.7rem', color: 'var(--danger)', borderColor: 'var(--danger)', padding: '2px 8px' }}
+        >
+          Delete
+        </button>
         <button className="close-btn" onClick={onClose}>×</button>
       </div>
       <div className="task-detail-meta">
@@ -425,12 +441,42 @@ function TaskDetailPanel({ task, onClose, onRefresh }: { task: GameTask; onClose
   )
 }
 
-function SettingsTab({ onRefresh, zoomSensitivity, onZoomSensitivity }: {
+function SettingsTab({ onRefresh, zoomSensitivity, onZoomSensitivity, projects }: {
   onRefresh: () => void
   zoomSensitivity: number
   onZoomSensitivity: (v: number) => void
+  projects: Project[]
 }) {
   const [loading, setLoading] = useState(false)
+  const [projectPath, setProjectPath] = useState('')
+  const [projectError, setProjectError] = useState<string | null>(null)
+  const [addingProject, setAddingProject] = useState(false)
+
+  const addProject = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!projectPath.trim()) return
+    setProjectError(null)
+    setAddingProject(true)
+    const res = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'path', value: projectPath.trim() }),
+    })
+    setAddingProject(false)
+    if (!res.ok) {
+      const body = await res.json() as { error?: string }
+      setProjectError(body.error ?? 'Failed to add project')
+      return
+    }
+    setProjectPath('')
+    onRefresh()
+  }
+
+  const deleteProject = async (id: string, name: string) => {
+    if (!confirm(`Remove project "${name}"?`)) return
+    await fetch(`/api/projects/${id}`, { method: 'DELETE' })
+    onRefresh()
+  }
 
   const triggerIngest = async () => {
     setLoading(true)
@@ -451,6 +497,38 @@ function SettingsTab({ onRefresh, zoomSensitivity, onZoomSensitivity }: {
 
   return (
     <div className="settings-tab">
+      <h4>Projects</h4>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+        {projects.map((p) => (
+          <div key={p.id} className="project-row">
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span className="project-name">{p.name}</span>
+              <span className="project-path dim">{p.path}</span>
+            </div>
+            <button
+              onClick={() => void deleteProject(p.id, p.name)}
+              style={{ fontSize: '0.7rem', color: 'var(--danger)', borderColor: 'var(--danger)', padding: '1px 6px', flexShrink: 0 }}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+        {projects.length === 0 && <p className="dim">No projects added.</p>}
+      </div>
+      <form onSubmit={addProject} style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', marginTop: '0.25rem' }}>
+        <input
+          type="text"
+          placeholder="/path/to/git/repo"
+          value={projectPath}
+          onChange={(e) => setProjectPath(e.target.value)}
+          style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'var(--mono)', fontSize: '0.78rem' }}
+        />
+        {projectError && <p className="error">{projectError}</p>}
+        <button className="btn-primary" type="submit" disabled={addingProject || !projectPath.trim()}>
+          {addingProject ? 'Adding…' : 'Add Project'}
+        </button>
+      </form>
+
       <h4>Canvas</h4>
       <div className="settings-row" style={{ flexDirection: 'column', gap: '0.25rem' }}>
         <label style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
@@ -595,7 +673,7 @@ export default function App() {
 
             {tab === 'pr-wall' && <PrWallTab tasks={tasks} />}
 
-            {tab === 'settings' && <SettingsTab onRefresh={refetchAll} zoomSensitivity={zoomSensitivity} onZoomSensitivity={setZoomSensitivity} />}
+            {tab === 'settings' && <SettingsTab onRefresh={refetchAll} zoomSensitivity={zoomSensitivity} onZoomSensitivity={setZoomSensitivity} projects={projects} />}
           </div>
         </aside>
       </div>
