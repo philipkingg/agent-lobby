@@ -297,7 +297,9 @@ export default function OfficeCanvas({ agents, tasks, onSelectAgent, zoomSensiti
     return () => obs.disconnect()
   }, [])
 
-  // Wheel zoom — non-passive to allow preventDefault
+  // Wheel handler — non-passive to allow preventDefault
+  // ctrlKey=true  → pinch gesture (zoom)
+  // ctrlKey=false → two-finger scroll (pan)
   const sensitivityRef = useRef(zoomSensitivity)
   sensitivityRef.current = zoomSensitivity
 
@@ -306,17 +308,23 @@ export default function OfficeCanvas({ agents, tasks, onSelectAgent, zoomSensiti
     if (!wrap) return
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
-      const s = sensitivityRef.current
-      const factor = e.deltaY < 0 ? (1 + s) : 1 / (1 + s)
-      setViewport((prev) => {
-        const newZoom = Math.max(0.15, Math.min(5, prev.zoom * factor))
-        const rect = wrap.getBoundingClientRect()
-        const mx = e.clientX - rect.left
-        const my = e.clientY - rect.top
-        const wx = (mx - prev.x) / prev.zoom
-        const wy = (my - prev.y) / prev.zoom
-        return { zoom: newZoom, x: mx - wx * newZoom, y: my - wy * newZoom }
-      })
+      if (e.ctrlKey) {
+        // Pinch to zoom — browser normalises pinch delta to same scale as scroll
+        const s = sensitivityRef.current
+        const factor = e.deltaY < 0 ? (1 + s) : 1 / (1 + s)
+        setViewport((prev) => {
+          const newZoom = Math.max(0.15, Math.min(5, prev.zoom * factor))
+          const rect = wrap.getBoundingClientRect()
+          const mx = e.clientX - rect.left
+          const my = e.clientY - rect.top
+          const wx = (mx - prev.x) / prev.zoom
+          const wy = (my - prev.y) / prev.zoom
+          return { zoom: newZoom, x: mx - wx * newZoom, y: my - wy * newZoom }
+        })
+      } else {
+        // Two-finger scroll — pan
+        setViewport((prev) => ({ ...prev, x: prev.x - e.deltaX, y: prev.y - e.deltaY }))
+      }
     }
     wrap.addEventListener('wheel', onWheel, { passive: false })
     return () => wrap.removeEventListener('wheel', onWheel)
