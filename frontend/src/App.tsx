@@ -175,48 +175,94 @@ function NewTaskPanel({ projects, onCreated }: { projects: Project[]; onCreated:
 
 interface TranscriptEntry { id: string; type: string; content: string; timestamp: string }
 
-function extractText(entry: TranscriptEntry): string | null {
+interface TranscriptLine {
+  kind: 'text' | 'tool' | 'result'
+  label: string
+  body: string
+}
+
+function parseEntry(entry: TranscriptEntry): TranscriptLine[] {
   try {
     const msg = JSON.parse(entry.content) as Record<string, unknown>
+
     if (entry.type === 'assistant') {
-      const message = msg.message as { content?: Array<{ type: string; text?: string }> } | undefined
-      const texts = (message?.content ?? [])
-        .filter((b) => b.type === 'text' && b.text)
-        .map((b) => b.text!)
-      return texts.join('\n').trim() || null
+      const message = msg.message as { content?: Array<{ type: string; text?: string; name?: string; input?: Record<string, unknown> }> } | undefined
+      const blocks = message?.content ?? []
+      return blocks.flatMap((b): TranscriptLine[] => {
+        if (b.type === 'text' && b.text?.trim()) {
+          return [{ kind: 'text', label: 'AI', body: b.text.trim() }]
+        }
+        if (b.type === 'tool_use' && b.name) {
+          // Build a short readable summary of the tool call
+          const input = b.input ?? {}
+          const firstVal = Object.values(input)[0]
+          const hint = typeof firstVal === 'string' ? ` ${firstVal.slice(0, 60)}` : ''
+          return [{ kind: 'tool', label: b.name, body: hint.trim() }]
+        }
+        return []
+      })
     }
+
     if (entry.type === 'result') {
-      const result = (msg.result as string | undefined) ?? ''
-      return result.trim() || null
+      const result = ((msg.result as string | undefined) ?? '').trim()
+      if (!result) return []
+      return [{ kind: 'result', label: msg.subtype === 'error' ? 'ERROR' : 'DONE', body: result }]
     }
-    return null
+
+    return []
   } catch {
-    return null
+    return []
   }
 }
 
-function TranscriptView({ taskId }: { taskId: string }) {
+function TranscriptView({ taskId, agentId, simple = false }: {
+  taskId: string
+  agentId?: string
+  simple?: boolean
+}) {
   const [entries, setEntries] = useState<TranscriptEntry[]>([])
+  const [mode, setMode] = useState<'simple' | 'full'>(simple ? 'simple' : 'full')
+
+  const url = agentId
+    ? `/api/tasks/${taskId}/transcript?agentId=${agentId}`
+    : `/api/tasks/${taskId}/transcript`
 
   useEffect(() => {
-    fetch(`/api/tasks/${taskId}/transcript`)
+    fetch(url)
       .then((r) => r.ok ? r.json() : Promise.reject())
       .then(setEntries)
       .catch(() => {})
-  }, [taskId])
+  }, [url])
 
-  const lines = entries.map((e) => ({ text: extractText(e), type: e.type })).filter((l) => l.text)
-
-  if (lines.length === 0) return <p className="dim" style={{ fontSize: '0.75rem' }}>No transcript yet.</p>
+  const lines = entries.flatMap(parseEntry)
+  const visible = mode === 'simple' ? lines.filter((l) => l.kind === 'text' || l.kind === 'result') : lines
 
   return (
-    <div className="transcript">
-      {lines.map((l, i) => (
-        <div key={i} className={`transcript-line transcript-${l.type}`}>
-          <span className="transcript-tag">{l.type === 'result' ? 'DONE' : 'AI'}</span>
-          <span className="transcript-text">{l.text}</span>
-        </div>
-      ))}
+    <div>
+      <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.3rem', alignItems: 'center' }}>
+        <span className="dim" style={{ fontSize: '0.68rem' }}>Transcript</span>
+        <button
+          style={{ fontSize: '0.62rem', padding: '1px 6px', opacity: mode === 'simple' ? 1 : 0.5 }}
+          onClick={() => setMode('simple')}
+        >Simple</button>
+        <button
+          style={{ fontSize: '0.62rem', padding: '1px 6px', opacity: mode === 'full' ? 1 : 0.5 }}
+          onClick={() => setMode('full')}
+        >Full</button>
+      </div>
+      {visible.length === 0
+        ? <p className="dim" style={{ fontSize: '0.75rem' }}>No transcript yet.</p>
+        : (
+          <div className="transcript">
+            {visible.map((l, i) => (
+              <div key={i} className={`transcript-line transcript-${l.kind}`}>
+                <span className={`transcript-tag transcript-tag-${l.kind}`}>{l.label}</span>
+                <span className="transcript-text">{l.body}</span>
+              </div>
+            ))}
+          </div>
+        )
+      }
     </div>
   )
 }
@@ -292,7 +338,7 @@ function AgentDetailPanel({ agent, task, onFire, onClose }: {
           {showTranscript ? 'Hide' : 'Show'} transcript
         </button>
       )}
-      {showTranscript && task && <TranscriptView taskId={task.id} />}
+      {showTranscript && task && <TranscriptView taskId={task.id} agentId={agent.id} simple />}
     </div>
   )
 }
@@ -537,6 +583,10 @@ function TaskDetailPanel({ task, onClose, onRefresh, onSelectTask }: {
           ))}
         </div>
       )}
+
+      <div style={{ marginTop: '0.5rem' }}>
+        <TranscriptView taskId={task.id} />
+      </div>
     </div>
   )
 }

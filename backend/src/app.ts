@@ -33,7 +33,7 @@ import {
   addAgentToSquad,
   removeAgentFromSquad,
 } from "./squads.js";
-import { listTranscriptEntries } from "./transcripts.js";
+import { listTranscriptEntries, listTranscriptEntriesByAgent } from "./transcripts.js";
 import { createWorktree, branchName, removeWorktree, WorktreeError } from "./worktrees.js";
 import type { WsEvent } from "./ws-events.js";
 import { PipelineRunner } from "./pipeline-runner.js";
@@ -316,6 +316,8 @@ export function buildApp(
     const { id } = request.params as { id: string };
     const task = getTask(db, id);
     if (!task) return reply.code(404).send({ error: "task not found" });
+    const { agentId } = request.query as { agentId?: string };
+    if (agentId) return listTranscriptEntriesByAgent(db, id, agentId);
     return listTranscriptEntries(db, id);
   });
 

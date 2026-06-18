@@ -399,15 +399,31 @@
   margin-top: 1px;
 }
 
-.transcript-result .transcript-tag {
+.transcript-tag-result {
   color: var(--success);
   background: var(--success-soft);
+}
+
+.transcript-tag-tool {
+  color: #ff9800;
+  background: rgba(255,152,0,0.12);
+}
+
+.transcript-tag-text {
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .transcript-text {
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.transcript-tool .transcript-text {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 0.68rem;
 }
 
 /* ── PR Wall ── */

@@ -39,6 +39,21 @@ export function listTranscriptEntries(db: DatabaseSync, taskId: string): Transcr
     .all(taskId) as TranscriptEntry[];
 }
 
+export function listTranscriptEntriesByAgent(
+  db: DatabaseSync,
+  taskId: string,
+  agentId: string
+): TranscriptEntry[] {
+  return db
+    .prepare(
+      `SELECT te.* FROM transcript_entries te
+       JOIN task_stages ts ON te.stageId = ts.id
+       WHERE te.taskId = ? AND ts.agentId = ?
+       ORDER BY te.timestamp ASC`
+    )
+    .all(taskId, agentId) as unknown as TranscriptEntry[];
+}
+
 export function listStageTranscriptEntries(db: DatabaseSync, stageId: string): TranscriptEntry[] {
   return db
     .prepare(`SELECT * FROM transcript_entries WHERE stageId = ? ORDER BY timestamp ASC`)
