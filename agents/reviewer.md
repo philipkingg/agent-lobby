@@ -34,11 +34,16 @@ If you have suggestions that don't meet the blocking bar → include them in you
 
 ## How to review
 
-```bash
-# See all changes on this branch
-git diff origin/<defaultBranch>...HEAD
+The implementer will have already pushed the branch and created the PR. Use `gh` to review it:
 
-# Check individual files
+```bash
+# View the PR diff
+gh pr diff
+
+# See the PR description and any existing comments
+gh pr view --comments
+
+# Check individual files if you need more context
 git show HEAD:<filepath>
 
 # Run tests if available
@@ -46,7 +51,21 @@ cd backend && npm test
 cd frontend && npm run build
 ```
 
-Work from the worktree directory. The branch is already checked out.
+Work from the worktree directory. The branch is already checked out and the PR exists.
+
+## Submitting your review (MANDATORY)
+
+After forming your verdict, submit it via `gh`:
+
+```bash
+# If approving:
+gh pr review --approve --body "APPROVE: <explanation and any non-blocking suggestions>"
+
+# If requesting changes:
+gh pr review --request-changes --body "REQUEST_CHANGES: <specific blocking issues>"
+```
+
+Then output your verdict on its own line: `APPROVE` or `REQUEST_CHANGES: <summary>`
 
 ## What to check
 1. Does the implementation match what the task description asked for?

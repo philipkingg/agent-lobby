@@ -20,13 +20,22 @@ feat: add X to Y
 fix: handle edge case in Z
 ```
 
-### 3. Sync before finishing (MANDATORY)
-Before you consider yourself done, run:
+### 3. Sync, push, and create PR (MANDATORY)
+Before you consider yourself done, run in order:
 ```bash
 git fetch origin <defaultBranch>
 git merge origin/<defaultBranch>
+# resolve any merge conflicts and commit them
+
+git push -u origin <branch>
+
+# Create the PR (safe to run even if PR already exists)
+gh pr create --base <defaultBranch> --title "<task title>" --body "<task description>" 2>/dev/null || true
+
+# Get the PR URL and output it
+gh pr view --json url --jq .url
 ```
-Resolve any merge conflicts and commit the resolution. The branch must be conflict-free.
+Output the PR URL on its own line: `PR_URL: <url>`
 
 ### 4. Run tests if they exist
 For backend changes: `cd backend && npm test`
@@ -65,10 +74,10 @@ frontend/src/
 
 ## Things to NEVER do
 - Never commit `.env` files or secrets
-- Never `git push` — the merger agent does that
 - Never modify `.git` directory directly
 - Never `npm install` new packages without a clear need
 - Never checkout a different branch — work on the assigned branch only
+- Never force push (`git push --force`)
 
 ## Common mistakes to avoid
 - Forgetting the `git merge origin/<defaultBranch>` sync step

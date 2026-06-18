@@ -251,7 +251,13 @@ export class PipelineRunner {
     // Re-fetch task to get latest state (e.g. requiresHumanReview may have changed)
     const freshTask = getTask(this.db, task.id) ?? task;
 
-    // Merge stage: extract PR URL from result text
+    // Extract PR URL after implementer pushes and creates the PR
+    if (freshTask.stage === "queued:implement") {
+      const prUrlMatch = resultText.match(/PR_URL:\s*(https:\/\/github\.com\/[^\s]+\/pull\/\d+)/i);
+      if (prUrlMatch) setTaskPrUrl(this.db, freshTask.id, prUrlMatch[1].trim());
+    }
+
+    // Merge stage: also capture PR URL in case implementer didn't set it
     if (freshTask.stage === "queued:merge") {
       const urlMatch = resultText.match(/https:\/\/github\.com\/[^\s)]+\/pull\/\d+/);
       if (urlMatch) setTaskPrUrl(this.db, freshTask.id, urlMatch[0]);

@@ -1,47 +1,37 @@
 # Merger Agent — Knowledge File
 
 ## Your job
-Push the approved branch, create a GitHub PR, and enable auto-merge.
+Merge the approved PR. The implementer already pushed the branch and created the PR; the reviewer already approved it. Your job is just to merge.
 
 ## Output format (MANDATORY)
-Output exactly `MERGED` when the PR is created and auto-merge is enabled. Nothing else is required after that.
+Output exactly `MERGED` when the PR has been merged. Nothing else is required after that.
 
 ## Steps (run in order)
 
-### 1. Verify the branch is ready
+### 1. Verify the PR is ready
 ```bash
-git status          # should be clean (no uncommitted changes)
-git log --oneline origin/<defaultBranch>..HEAD   # confirm commits exist
+gh pr view        # confirm it's approved and not blocked by CI
+git status        # should be clean
 ```
 
-### 2. Push the branch
+### 2. Merge the PR
 ```bash
-git push -u origin <branch>
+gh pr merge --squash
 ```
-If push is rejected (non-fast-forward): do NOT force push. Run `git pull --rebase origin <branch>` first, then push.
-
-### 3. Create the PR
+If you want to wait for CI before merging, use `--auto`:
 ```bash
-gh pr create \
-  --base <defaultBranch> \
-  --title "<task title>" \
-  --body "<task description>"
+gh pr merge --squash --auto
 ```
-This prints the PR URL — note it for the output.
 
-### 4. Enable auto-merge
-```bash
-gh pr merge --auto --squash
-```
-This enables auto-merge so the PR merges automatically once CI passes.
-
-### 5. Output MERGED
+### 3. Output MERGED
 Output the word `MERGED` on its own line.
 
-## If the PR already exists
-If `gh pr create` fails saying a PR already exists:
+## If the PR does not exist yet (fallback)
+If the implementer failed to create the PR:
 ```bash
-gh pr merge --auto --squash
+git push -u origin <branch>
+gh pr create --base <defaultBranch> --title "<task title>" --body "<description>"
+gh pr merge --squash
 ```
 Then output `MERGED`.
 

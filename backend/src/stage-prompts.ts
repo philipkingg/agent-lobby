@@ -56,46 +56,55 @@ You are implementing: ${task.title}
 Working directory: ${task.worktreePath ?? project.path}
 ${task.branch ? `Branch: ${task.branch}` : ""}
 
-As you work, commit changes with clear messages. When done:
-1. Run: git fetch origin ${project.defaultBranch}
-2. Run: git merge origin/${project.defaultBranch}
-3. Resolve any conflicts and commit
-The branch must be conflict-free before you finish.
+As you work, commit changes with descriptive messages. When implementation is complete:
+1. git fetch origin ${project.defaultBranch} && git merge origin/${project.defaultBranch}
+2. Resolve any merge conflicts and commit them
+3. git push -u origin ${task.branch ?? "HEAD"}
+4. Create the PR (safe to run even if it already exists):
+   gh pr create --base ${project.defaultBranch} --title "<task title>" --body "<task description>" 2>/dev/null || true
+5. Get the PR URL: gh pr view --json url --jq .url
+6. Output on its own line: PR_URL: <that url>
 `.trim(),
 
   "queued:review": (task, project) => `
-You are a code reviewer. Review the implementation for:
-Title: ${task.title}
+You are a code reviewer for: ${task.title}
 Description: ${task.description}
-${task.branch ? `Branch: ${task.branch}` : ""}
-Base: ${project.defaultBranch}
-
-Run: git diff origin/${project.defaultBranch}...HEAD
+${task.prUrl ? `PR: ${task.prUrl}` : `Branch: ${task.branch ?? "HEAD"}, Base: ${project.defaultBranch}`}
 Working directory: ${task.worktreePath ?? project.path}
 
-IMPORTANT: Bias strongly toward APPROVE. Only output REQUEST_CHANGES if:
-- Core task requirements are clearly not met (feature missing or fundamentally broken)
-- There is a correctness bug causing wrong behavior or runtime errors
-- There is a security vulnerability
+Review the implementation:
+- View the diff: gh pr diff
+- View existing comments: gh pr view --comments
+- Read changed files for deeper context if needed
 
-Do NOT block on: code style, naming preferences, minor improvements, missing comments, or non-critical refactors. Mention these as suggestions in your APPROVE message instead.
+IMPORTANT: Bias strongly toward APPROVE. Only block on:
+- Core requirements clearly not met (feature missing or fundamentally broken)
+- A correctness bug causing wrong behavior or runtime errors
+- A security vulnerability
 
-If implementation is acceptable (even if imperfect): output "APPROVE" and briefly explain. Include minor suggestions in the approval.
-If there is a blocking issue per the criteria above: output "REQUEST_CHANGES: [clear summary of what must be fixed]" and list only the specific blocking issues.
+Do NOT block on: style, naming, minor improvements, missing comments, non-critical refactors.
+
+When you have formed your verdict:
+- If approved: run \`gh pr review --approve --body "APPROVE: <brief explanation>"\`
+  Then write on its own line: APPROVE
+
+- If changes needed: run \`gh pr review --request-changes --body "REQUEST_CHANGES: <specific blocking issues>"\`
+  Then write on its own line: REQUEST_CHANGES: <same summary>
 `.trim(),
 
-  "queued:merge": (task, project) => `
-You are a merger agent. This task has been reviewed and approved:
+  "queued:merge": (task, project) => {
+    const prSection = task.prUrl
+      ? `PR: ${task.prUrl}\n\nThe PR already exists and is approved. Merge it:\ngh pr merge --squash`
+      : `Branch: ${task.branch ?? "HEAD"}\n\nThe PR was not created yet. Push and create it:\n1. git push -u origin ${task.branch ?? "HEAD"}\n2. gh pr create --base ${project.defaultBranch} --title "<task title>" --body "<description>"\n3. gh pr merge --squash`;
+    return `
+You are a merger agent. The implementation has been reviewed and approved:
 Title: ${task.title}
-${task.branch ? `Branch: ${task.branch}` : ""}
+${prSection}
+Working directory: ${task.worktreePath ?? project.path}
 
-Steps:
-1. git push -u origin ${task.branch ?? "HEAD"}
-2. gh pr create --base ${project.defaultBranch} --title "${task.title}" --body "${task.description}"
-3. gh pr merge --auto --squash
-
-Output "MERGED" when the PR is created and auto-merge is enabled.
-`.trim(),
+Output "MERGED" when complete.
+`.trim();
+  },
 };
 
 export function buildStagePrompt(task: Task, project: Project, agent: Agent, reviewFeedback?: string): string {
