@@ -127,7 +127,13 @@ export class PipelineRunner {
     );
 
     const server = createSdkMcpServer({ name: "agent-office", tools: [askUserTool] });
-    const prompt = buildStagePrompt(task, project, agent);
+
+    let reviewFeedback: string | undefined;
+    if (task.stage === "queued:implement" && task.reviewLoopCount > 0) {
+      reviewFeedback = this.getLastReviewerFeedback(task.id) ?? undefined;
+    }
+
+    const prompt = buildStagePrompt(task, project, agent, reviewFeedback);
 
     const cwd = task.worktreePath ?? project.path;
     const abortController = new AbortController();
@@ -206,6 +212,27 @@ export class PipelineRunner {
     } finally {
       this.controllers.delete(task.id);
       this.stopRequested.delete(task.id);
+    }
+  }
+
+  private getLastReviewerFeedback(taskId: string): string | null {
+    const row = this.db
+      .prepare(
+        `SELECT te.content
+         FROM transcript_entries te
+         JOIN task_stages ts ON te.stageId = ts.id
+         WHERE te.taskId = ? AND ts.stage = 'queued:review' AND te.type = 'result'
+         ORDER BY te.timestamp DESC
+         LIMIT 1`
+      )
+      .get(taskId) as { content: string } | undefined;
+
+    if (!row) return null;
+    try {
+      const msg = JSON.parse(row.content) as { result?: string };
+      return msg.result?.trim() ?? null;
+    } catch {
+      return null;
     }
   }
 

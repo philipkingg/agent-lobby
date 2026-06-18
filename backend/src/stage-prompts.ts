@@ -60,8 +60,15 @@ Base: ${project.defaultBranch}
 Run: git diff origin/${project.defaultBranch}...HEAD
 Working directory: ${task.worktreePath ?? project.path}
 
-If the implementation is acceptable: output "APPROVE" and briefly explain.
-If changes are needed: output "REQUEST_CHANGES: [summary]" and list specific issues.
+IMPORTANT: Bias strongly toward APPROVE. Only output REQUEST_CHANGES if:
+- Core task requirements are clearly not met (feature missing or fundamentally broken)
+- There is a correctness bug causing wrong behavior or runtime errors
+- There is a security vulnerability
+
+Do NOT block on: code style, naming preferences, minor improvements, missing comments, or non-critical refactors. Mention these as suggestions in your APPROVE message instead.
+
+If implementation is acceptable (even if imperfect): output "APPROVE" and briefly explain. Include minor suggestions in the approval.
+If there is a blocking issue per the criteria above: output "REQUEST_CHANGES: [clear summary of what must be fixed]" and list only the specific blocking issues.
 `.trim(),
 
   "queued:merge": (task, project) => `
@@ -78,14 +85,18 @@ Output "MERGED" when the PR is created and auto-merge is enabled.
 `.trim(),
 };
 
-export function buildStagePrompt(task: Task, project: Project, agent: Agent): string {
+export function buildStagePrompt(task: Task, project: Project, agent: Agent, reviewFeedback?: string): string {
   const baseBuilder = STAGE_BASE_PROMPTS[task.stage];
   const base = baseBuilder ? baseBuilder(task, project) : `Complete task: ${task.title}\n${task.description}`;
 
   const personality = parsePersonality(agent);
   const personalityText = buildPersonalityPrompt(personality);
 
-  return base + personalityText;
+  const feedbackSection = reviewFeedback
+    ? `\n\nPREVIOUS REVIEW FEEDBACK — you MUST address these specific issues before finishing:\n\n${reviewFeedback}`
+    : "";
+
+  return base + feedbackSection + personalityText;
 }
 
 // Detect a review rejection in the result text
