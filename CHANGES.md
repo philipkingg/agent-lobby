@@ -4,6 +4,84 @@ This file tracks what has been built. Read it at the start of each new session f
 
 ---
 
+## Phase 13 — PR-Based Review Flow [TODO]
+
+**Goal:** Implementer creates a real GitHub PR when implementation is done. Reviewer reviews it by reading the actual PR diff and leaving inline comments via `gh`. Review feedback travels through the PR, not just through the agent prompt. Implementer is re-dispatched to address those comments.
+
+### Current (broken) flow
+- Implementer works on branch, commits, done
+- Reviewer reads `git diff` and outputs text — no PR exists yet
+- REQUEST_CHANGES loops implementer back with text feedback injected into prompt
+- Merger creates the PR at the end
+
+### Target flow
+1. **Implementer finishes** → pushes branch → creates PR (`gh pr create`) → outputs `PR_READY: <url>`
+2. **Pipeline runner** detects `PR_READY`, stores URL via `setTaskPrUrl`, advances to `queued:review`
+3. **Reviewer** uses `gh pr view <number> --comments` + `gh pr diff <number>` to read the PR, then either:
+   - `gh pr review <number> --approve` → outputs `APPROVE`
+   - `gh pr review <number> --request-changes --body "..."` → outputs `REQUEST_CHANGES: <summary>`
+4. **On REQUEST_CHANGES:** pipeline runner loops task back to `queued:implement`. Implementer prompt includes the PR URL and is told to read PR review comments (`gh pr view --comments`) and address them, then push new commits.
+5. **On APPROVE:** advance to `queued:merge`. Merger does `gh pr merge --squash --auto`.
+
+### Changes needed
+- **`stage-prompts.ts`** — implementer prompt: after finishing, push branch and create PR, output `PR_READY: <url>`. Include PR URL + "read comments with `gh pr view --comments`" when `reviewLoopCount > 0`.
+- **`stage-prompts.ts`** — reviewer prompt: use `gh pr view <number>` and `gh pr diff`, leave review via `gh pr review`, output `APPROVE` or `REQUEST_CHANGES`.
+- **`pipeline-runner.ts`** — detect `PR_READY: <url>` in implementer result, call `setTaskPrUrl`, then advance stage normally.
+- **`pipeline-runner.ts`** — pass PR URL to implementer on retry (already injected via `reviewFeedback`, but add explicit "go to PR: <url>" instruction).
+- **`stage-prompts.ts`** — merger prompt simplifies: PR already exists, just do `gh pr merge --squash --auto`.
+
+### Key decisions
+- PR created by implementer, not merger — merger just merges
+- Reviewer only reviews via PR (not raw git diff) — consistent with real code review
+- PR wall gets populated earlier (after first implement pass, not after merge)
+
+---
+
+## Phase 12 — Task Lifecycle: New → Ready Gate [TODO]
+
+**Goal:** Tasks created by the user start in `new` status and are invisible to the scheduler. User explicitly moves them to `ready` to allow agent pickup. Prevents agents from immediately grabbing half-formed tickets.
+
+### What changes
+- **`tasks.ts`** — add `"new"` and `"ready"` to `TaskStatus`. New tasks default to `status = 'new'`.
+- **`tasks.ts`** — `nextQueuedTaskForJobType` only picks up tasks with `status = 'ready'` (not `'queued'`... wait, need to think this through). Actually: `new` = user hasn't released it. `ready` = user released it, scheduler can pick up. Once scheduler claims it → `running`. Keep existing `queued` as scheduler-visible state — rename meaning: `new` = draft, `ready` = released to queue, `queued` = in pipeline waiting for an agent, `running` = agent working.
+  - Simpler: `new` status is scheduler-invisible. `POST /tasks/:id/ready` moves `new → queued:prioritize / status:queued`. Everything downstream unchanged.
+- **`backend/src/app.ts`** — add `POST /tasks/:id/release` endpoint (moves `new → queued`).
+- **`frontend/src/App.tsx`** — task creation always produces `status: 'new'`. Task row shows "Release" button for `new` tasks. `new` tasks shown in their own section or with a distinct badge.
+- **DB migration** — `createTask` sets `status = 'new'` instead of `'queued'`. Old tasks already in queue unaffected.
+
+### Key decisions
+- GitHub issue ingestion: issues start `new` too — human must release them (or add a setting to auto-release)
+- Epic children: start `new` or auto-release? Auto-release makes sense since the planner already decided to create them.
+- Task panel: show "Release to queue" button for `new` tasks alongside delete
+
+---
+
+## Phase 11 — UI Improvements [TODO]
+
+**Goal:** Several small but important UI fixes and additions.
+
+### 1. Agent inspect panel position
+Move agent detail panel ABOVE the agent list (not below). Currently clicking an agent appends the detail panel below the list — you have to scroll down to see it. Swap render order: detail panel renders first (when an agent is selected), list below.
+
+- **`frontend/src/App.tsx`** — in the agents tab JSX, render `<AgentDetailPanel>` before `<AgentList>` / agent rows when `selectedAgent !== null`.
+
+### 2. Task creation form — missing fields
+Current form only has title + description + project. Missing:
+- **Priority** — 1–5 number input or star/dot selector (default 3)
+- **Human review** — checkbox (requires human approval at each stage gate)
+- **Squad** — dropdown to associate task with a squad (optional; limits which agents can pick it up)
+
+- **`frontend/src/App.tsx`** — add priority input, requiresHumanReview checkbox, squad dropdown to the new task form
+- **`backend/src/app.ts`** — `POST /tasks` already accepts these fields; frontend just wasn't sending them
+
+### 3. Epic collapsible sections in task list
+Epics (tasks with `status = 'split'`) should render as collapsible headers in the task list. Children are shown indented under the parent when expanded. Epic row shows a ▶/▼ toggle.
+
+- **`frontend/src/App.tsx`** — group tasks: epics + their children. Epic row has expand/collapse toggle state. Children render as indented rows under their epic when expanded. Non-epic, non-child tasks render normally.
+- Collapsed by default; expand on click of the ▶ icon (not the whole row, which opens detail panel).
+
+---
+
 ## Phase 10 — Auditor / Manager Agent [TODO]
 
 **Goal:** A new `auditor` job type that observes completed work across all agent types, scores their efficiency, and proposes targeted edits to the `agents/{type}.md` knowledge files. Closes the feedback loop — the system improves its own agents over time.
