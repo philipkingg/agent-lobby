@@ -23,7 +23,7 @@ import {
   setTaskWorktree,
   type CreateTaskInput,
 } from "./tasks.js";
-import { hireAgent, fireAgent, listAgents, getAgent, type HireAgentInput } from "./agents.js";
+import { hireAgent, fireAgent, listAgents, getAgent, type HireAgentInput, type Agent } from "./agents.js";
 import {
   createSquad,
   updateSquad,
@@ -39,6 +39,11 @@ import type { WsEvent } from "./ws-events.js";
 import { PipelineRunner } from "./pipeline-runner.js";
 import { AgentScheduler } from "./scheduler.js";
 import { CronService, pollPrComments, ingestGithubIssues } from "./cron-service.js";
+import {
+  runAuditSession,
+  listKnowledgeSuggestions,
+  resolveKnowledgeSuggestion,
+} from "./audit-runner.js";
 
 export type { GitExecFn };
 
@@ -145,7 +150,7 @@ export function buildApp(
 
   app.post("/agents", async (request, reply) => {
     const body = request.body as Partial<HireAgentInput>;
-    const validJobTypes = ["prioritizer", "planner", "implementer", "reviewer", "merger"];
+    const validJobTypes = ["prioritizer", "planner", "implementer", "reviewer", "merger", "auditor"];
 
     if (!body.jobType || !validJobTypes.includes(body.jobType)) {
       return reply.code(400).send({
@@ -450,6 +455,49 @@ export function buildApp(
   app.post("/scheduler/tick", async () => {
     await scheduler.tick();
     return { ok: true };
+  });
+
+  // ── Audit ─────────────────────────────────────────────────────────────────
+
+  app.post("/audit/run", async (_request, reply) => {
+    const auditor = db
+      .prepare(
+        `SELECT * FROM agents WHERE jobType = 'auditor' AND currentTaskId IS NULL AND currentStation IS NULL AND firedAt IS NULL LIMIT 1`
+      )
+      .get() as Agent | undefined;
+
+    if (!auditor) {
+      return reply.code(404).send({
+        error: "No idle auditor available. Hire an auditor agent first.",
+      });
+    }
+
+    void runAuditSession(db, auditor, broadcast).catch(console.error);
+    return { ok: true, agentId: auditor.id };
+  });
+
+  app.get("/audit/suggestions", async (request) => {
+    const query = request.query as { status?: string };
+    return listKnowledgeSuggestions(db, query.status);
+  });
+
+  app.post("/audit/suggestions/:id/approve", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const updated = resolveKnowledgeSuggestion(db, id, "approved");
+    if (!updated) {
+      return reply.code(404).send({ error: "suggestion not found or already resolved" });
+    }
+    broadcast("global", { type: "audit:new-suggestions", count: 0 });
+    return updated;
+  });
+
+  app.post("/audit/suggestions/:id/reject", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const updated = resolveKnowledgeSuggestion(db, id, "rejected");
+    if (!updated) {
+      return reply.code(404).send({ error: "suggestion not found or already resolved" });
+    }
+    return updated;
   });
 
   // ── Settings ──────────────────────────────────────────────────────────────

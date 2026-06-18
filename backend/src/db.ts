@@ -4,7 +4,7 @@ const { DatabaseSync: DatabaseSyncImpl } = process.getBuiltinModule("node:sqlite
   DatabaseSync: typeof DatabaseSync;
 };
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 function getSchemaVersion(db: DatabaseSync): number {
   try {
@@ -52,7 +52,7 @@ function applyV2Schema(db: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      jobType TEXT NOT NULL CHECK(jobType IN ('prioritizer','planner','implementer','reviewer','merger')),
+      jobType TEXT NOT NULL,
       model TEXT NOT NULL,
       level INTEGER NOT NULL DEFAULT 1,
       xp INTEGER NOT NULL DEFAULT 0,
@@ -144,6 +144,19 @@ function applyV2Schema(db: DatabaseSync): void {
     )
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS knowledge_suggestions (
+      id TEXT PRIMARY KEY,
+      agentType TEXT NOT NULL,
+      proposedContent TEXT NOT NULL,
+      rationale TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      auditAgentId TEXT,
+      createdAt TEXT NOT NULL,
+      resolvedAt TEXT
+    )
+  `);
+
   setSchemaVersion(db, SCHEMA_VERSION);
 }
 
@@ -179,7 +192,7 @@ function migrateV1ToV2(db: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      jobType TEXT NOT NULL CHECK(jobType IN ('prioritizer','planner','implementer','reviewer','merger')),
+      jobType TEXT NOT NULL,
       model TEXT NOT NULL,
       level INTEGER NOT NULL DEFAULT 1,
       xp INTEGER NOT NULL DEFAULT 0,
@@ -283,6 +296,45 @@ function migrateV2ToV3(db: DatabaseSync): void {
   setSchemaVersion(db, 3);
 }
 
+function migrateV3ToV4(db: DatabaseSync): void {
+  // Recreate agents table without the jobType CHECK constraint so 'auditor' can be inserted
+  db.exec(`
+    CREATE TABLE agents_new (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      jobType TEXT NOT NULL,
+      model TEXT NOT NULL,
+      level INTEGER NOT NULL DEFAULT 1,
+      xp INTEGER NOT NULL DEFAULT 0,
+      avatar TEXT NOT NULL,
+      personality TEXT NOT NULL,
+      currentStation TEXT,
+      currentTaskId TEXT,
+      squadId TEXT,
+      hiredAt TEXT NOT NULL,
+      firedAt TEXT
+    )
+  `);
+  db.exec(`INSERT INTO agents_new SELECT * FROM agents`);
+  db.exec(`DROP TABLE agents`);
+  db.exec(`ALTER TABLE agents_new RENAME TO agents`);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS knowledge_suggestions (
+      id TEXT PRIMARY KEY,
+      agentType TEXT NOT NULL,
+      proposedContent TEXT NOT NULL,
+      rationale TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      auditAgentId TEXT,
+      createdAt TEXT NOT NULL,
+      resolvedAt TEXT
+    )
+  `);
+
+  setSchemaVersion(db, 4);
+}
+
 export function createDb(path: string = ":memory:"): DatabaseSync {
   const db = new DatabaseSyncImpl(path);
 
@@ -300,8 +352,12 @@ export function createDb(path: string = ":memory:"): DatabaseSync {
   } else if (version === 1) {
     migrateV1ToV2(db);
     migrateV2ToV3(db);
+    migrateV3ToV4(db);
   } else if (version === 2) {
     migrateV2ToV3(db);
+    migrateV3ToV4(db);
+  } else if (version === 3) {
+    migrateV3ToV4(db);
   }
 
   // Ensure tables that may be missing from partial historical migrations
@@ -323,6 +379,19 @@ export function createDb(path: string = ":memory:"): DatabaseSync {
       branch TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'active',
       createdAt TEXT NOT NULL
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS knowledge_suggestions (
+      id TEXT PRIMARY KEY,
+      agentType TEXT NOT NULL,
+      proposedContent TEXT NOT NULL,
+      rationale TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      auditAgentId TEXT,
+      createdAt TEXT NOT NULL,
+      resolvedAt TEXT
     )
   `);
 

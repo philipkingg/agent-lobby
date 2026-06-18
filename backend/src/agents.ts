@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
-export type JobType = "prioritizer" | "planner" | "implementer" | "reviewer" | "merger";
+export type JobType = "prioritizer" | "planner" | "implementer" | "reviewer" | "merger" | "auditor";
 export type Avatar = "Adam" | "Alex" | "Amelia" | "Bob";
 
 export interface Trait {
@@ -43,6 +43,7 @@ const JOB_MODELS: Record<JobType, string> = {
   implementer: "claude-sonnet-4-6",
   reviewer: "claude-sonnet-4-6",
   merger: "claude-haiku-4-5-20251001",
+  auditor: "claude-opus-4-8",
 };
 
 const AVATARS: Avatar[] = ["Adam", "Alex", "Amelia", "Bob"];

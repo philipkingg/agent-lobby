@@ -56,15 +56,28 @@ export interface Squad {
   projectIds: string // JSON-encoded string[]
 }
 
+export interface KnowledgeSuggestion {
+  id: string
+  agentType: string
+  proposedContent: string
+  rationale: string
+  status: 'pending' | 'approved' | 'rejected'
+  auditAgentId: string | null
+  createdAt: string
+  resolvedAt: string | null
+}
+
 interface GameState {
   agents: GameAgent[]
   tasks: GameTask[]
   userProfile: UserProfile | null
   projects: Project[]
   squads: Squad[]
+  suggestions: KnowledgeSuggestion[]
   refetchTasks: () => void
   refetchAgents: () => void
   refetchSquads: () => void
+  refetchSuggestions: () => void
   refetchAll: () => void
 }
 
@@ -74,6 +87,7 @@ export function useGameState(): GameState {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
   const [squads, setSquads] = useState<Squad[]>([])
+  const [suggestions, setSuggestions] = useState<KnowledgeSuggestion[]>([])
   const wsRef = useRef<WebSocket | null>(null)
 
   const fetchAgents = () =>
@@ -106,12 +120,19 @@ export function useGameState(): GameState {
       .then(setSquads)
       .catch(() => {})
 
+  const fetchSuggestions = () =>
+    fetch('/api/audit/suggestions')
+      .then((r) => r.ok ? r.json() : Promise.reject())
+      .then(setSuggestions)
+      .catch(() => {})
+
   const fetchAll = () => {
     void fetchAgents()
     void fetchTasks()
     void fetchProfile()
     void fetchProjects()
     void fetchSquads()
+    void fetchSuggestions()
   }
 
   useEffect(() => {
@@ -158,6 +179,9 @@ export function useGameState(): GameState {
             case 'task:stuck':
               void fetchTasks()
               break
+            case 'audit:new-suggestions':
+              void fetchSuggestions()
+              break
           }
         } catch {
           // ignore malformed messages
@@ -185,9 +209,11 @@ export function useGameState(): GameState {
     userProfile,
     projects,
     squads,
+    suggestions,
     refetchTasks: fetchTasks,
     refetchAgents: fetchAgents,
     refetchSquads: fetchSquads,
+    refetchSuggestions: fetchSuggestions,
     refetchAll: fetchAll,
   }
 }

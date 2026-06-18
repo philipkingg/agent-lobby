@@ -704,3 +704,66 @@
   border-radius: 3px;
   padding: 1px 5px;
 }
+
+/* ── Audit tab ── */
+
+.audit-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.audit-suggestion {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.5rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.audit-suggestion-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.audit-type-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.audit-rationale {
+  flex: 1;
+  font-size: 0.75rem;
+  color: var(--text-h);
+  line-height: 1.4;
+}
+
+.audit-content-preview {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  line-height: 1.5;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.5rem;
+  overflow-x: auto;
+  max-height: 300px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.audit-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.15rem;
+}

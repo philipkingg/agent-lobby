@@ -82,7 +82,7 @@ Epics (tasks with `status = 'split'`) should render as collapsible headers in th
 
 ---
 
-## Phase 10 — Auditor / Manager Agent [TODO]
+## Phase 10 — Auditor / Manager Agent [DONE]
 
 **Goal:** A new `auditor` job type that observes completed work across all agent types, scores their efficiency, and proposes targeted edits to the `agents/{type}.md` knowledge files. Closes the feedback loop — the system improves its own agents over time.
 

@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react'
 import './App.css'
 import OfficeCanvas from './OfficeCanvas'
 import { useGameState } from './useGameState'
-import type { GameAgent, GameTask, Project, Squad } from './useGameState'
+import type { GameAgent, GameTask, Project, Squad, KnowledgeSuggestion } from './useGameState'
 
-type Tab = 'agents' | 'tasks' | 'squads' | 'pr-wall' | 'settings'
+type Tab = 'agents' | 'tasks' | 'squads' | 'pr-wall' | 'settings' | 'audit'
 
 const STAGE_LABELS: Record<string, string> = {
   'queued:prioritize': 'Prioritize',
@@ -835,8 +835,143 @@ function SettingsTab({ onRefresh, zoomSensitivity, onZoomSensitivity, projects }
   )
 }
 
+// ── Audit Tab ─────────────────────────────────────────────────────────────────
+
+const AGENT_TYPE_COLOR: Record<string, string> = {
+  prioritizer: '#607d8b',
+  planner: '#7b1fa2',
+  implementer: '#1976d2',
+  reviewer: '#388e3c',
+  merger: '#f57c00',
+}
+
+function AuditTab({ suggestions, onRefresh }: { suggestions: KnowledgeSuggestion[]; onRefresh: () => void }) {
+  const [running, setRunning] = useState(false)
+  const [runError, setRunError] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [resolving, setResolving] = useState<string | null>(null)
+
+  const pending = suggestions.filter((s) => s.status === 'pending')
+  const resolved = suggestions.filter((s) => s.status !== 'pending')
+
+  const runAudit = async () => {
+    setRunning(true)
+    setRunError(null)
+    const res = await fetch('/api/audit/run', { method: 'POST' })
+    setRunning(false)
+    if (!res.ok) {
+      const body = await res.json() as { error?: string }
+      setRunError(body.error ?? 'Failed to start audit')
+    }
+  }
+
+  const resolve = async (id: string, action: 'approve' | 'reject') => {
+    setResolving(id)
+    await fetch(`/api/audit/suggestions/${id}/${action}`, { method: 'POST' })
+    setResolving(null)
+    onRefresh()
+  }
+
+  const toggleExpand = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const renderSuggestion = (s: KnowledgeSuggestion, isPending: boolean) => {
+    const typeColor = AGENT_TYPE_COLOR[s.agentType] ?? '#666'
+    const isExpanded = expanded.has(s.id)
+    return (
+      <div key={s.id} className="audit-suggestion">
+        <div className="audit-suggestion-header">
+          <span className="audit-type-badge" style={{ background: typeColor + '22', color: typeColor, border: `1px solid ${typeColor}44` }}>
+            {s.agentType}
+          </span>
+          <span className="audit-rationale">{s.rationale}</span>
+          <button
+            style={{ fontSize: '0.65rem', padding: '1px 6px', flexShrink: 0 }}
+            onClick={() => toggleExpand(s.id)}
+          >
+            {isExpanded ? 'Hide' : 'View'}
+          </button>
+        </div>
+        {isExpanded && (
+          <pre className="audit-content-preview">{s.proposedContent}</pre>
+        )}
+        {isPending && (
+          <div className="audit-actions">
+            <button
+              className="btn-primary"
+              style={{ fontSize: '0.72rem', padding: '3px 10px' }}
+              onClick={() => void resolve(s.id, 'approve')}
+              disabled={resolving === s.id}
+            >
+              {resolving === s.id ? '…' : 'Approve & Apply'}
+            </button>
+            <button
+              style={{ fontSize: '0.72rem', padding: '3px 10px', color: 'var(--danger)', borderColor: 'var(--danger)' }}
+              onClick={() => void resolve(s.id, 'reject')}
+              disabled={resolving === s.id}
+            >
+              Reject
+            </button>
+          </div>
+        )}
+        {!isPending && (
+          <div style={{ fontSize: '0.68rem', color: s.status === 'approved' ? '#4caf50' : '#90a4ae', marginTop: '0.25rem' }}>
+            {s.status === 'approved' ? '✓ Applied' : '✗ Rejected'}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="audit-tab">
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+        <h4 style={{ margin: 0 }}>Agent Auditor</h4>
+        <button
+          className="btn-primary"
+          style={{ fontSize: '0.72rem', padding: '3px 10px' }}
+          onClick={() => void runAudit()}
+          disabled={running}
+        >
+          {running ? 'Running audit…' : 'Run Audit'}
+        </button>
+      </div>
+      <p className="dim" style={{ fontSize: '0.72rem', marginTop: 0, marginBottom: '0.5rem' }}>
+        Auditor reviews agent performance and proposes improvements to knowledge files.
+        Hire an "auditor" agent before running.
+      </p>
+      {runError && <p className="error">{runError}</p>}
+      {running && <p className="dim" style={{ fontSize: '0.75rem' }}>Audit in progress — agent is analysing performance data…</p>}
+
+      {pending.length > 0 && (
+        <>
+          <p className="list-header">Pending Suggestions ({pending.length})</p>
+          {pending.map((s) => renderSuggestion(s, true))}
+        </>
+      )}
+
+      {pending.length === 0 && !running && (
+        <p className="dim" style={{ fontSize: '0.78rem' }}>No pending suggestions. Run an audit to generate recommendations.</p>
+      )}
+
+      {resolved.length > 0 && (
+        <>
+          <p className="list-header" style={{ marginTop: '0.75rem' }}>Resolved ({resolved.length})</p>
+          {resolved.map((s) => renderSuggestion(s, false))}
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function App() {
-  const { agents, tasks, userProfile, projects, squads, refetchAgents, refetchTasks, refetchSquads, refetchAll } = useGameState()
+  const { agents, tasks, userProfile, projects, squads, suggestions, refetchAgents, refetchTasks, refetchSquads, refetchSuggestions, refetchAll } = useGameState()
   const [tab, setTab] = useState<Tab>('agents')
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
@@ -885,6 +1020,7 @@ export default function App() {
             <button className={tab === 'tasks' ? 'tab active' : 'tab'} onClick={() => setTab('tasks')}>Tasks</button>
             <button className={tab === 'squads' ? 'tab active' : 'tab'} onClick={() => setTab('squads')}>Squads</button>
             <button className={tab === 'pr-wall' ? 'tab active' : 'tab'} onClick={() => setTab('pr-wall')}>PRs</button>
+            <button className={tab === 'audit' ? 'tab active' : 'tab'} onClick={() => setTab('audit')}>Audit</button>
             <button className={tab === 'settings' ? 'tab active' : 'tab'} onClick={() => setTab('settings')}>⚙</button>
           </div>
 
@@ -958,6 +1094,8 @@ export default function App() {
             {tab === 'squads' && <SquadsTab squads={squads} agents={agents} projects={projects} onRefresh={refetchSquads} />}
 
             {tab === 'pr-wall' && <PrWallTab tasks={tasks} />}
+
+            {tab === 'audit' && <AuditTab suggestions={suggestions} onRefresh={refetchSuggestions} />}
 
             {tab === 'settings' && <SettingsTab onRefresh={refetchAll} zoomSensitivity={zoomSensitivity} onZoomSensitivity={setZoomSensitivity} projects={projects} />}
           </div>

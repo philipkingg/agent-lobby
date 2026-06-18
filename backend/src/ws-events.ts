@@ -11,6 +11,7 @@ export type WsEvent =
   | { type: "agent:xp"; agentId: string; xp: number; level: number; leveledUp: boolean }
   | { type: "user:xp"; xp: number; level: number; xpToNext: number; leveledUp: boolean }
   | { type: "task:gate"; taskId: string; stage: TaskStage }
-  | { type: "task:stuck"; taskId: string; reviewLoopCount: number };
+  | { type: "task:stuck"; taskId: string; reviewLoopCount: number }
+  | { type: "audit:new-suggestions"; count: number };
 
 export type Broadcast = (channel: string, event: WsEvent) => void;
