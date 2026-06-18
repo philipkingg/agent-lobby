@@ -16,6 +16,7 @@ const STAGE_LABELS: Record<string, string> = {
 }
 
 const STATUS_COLOR: Record<string, string> = {
+  new: '#546e7a',
   queued: '#90a4ae',
   running: '#4caf50',
   blocked: '#ffc107',
@@ -596,6 +597,19 @@ function TaskDetailPanel({ task, onClose, onRefresh, onSelectTask }: {
         </div>
       )}
 
+      {task.status === 'new' && (
+        <div className="task-action-row">
+          <button className="btn-primary" onClick={async () => {
+            setLoading(true)
+            await fetch(`/api/tasks/${task.id}/release`, { method: 'POST' })
+            setLoading(false)
+            onRefresh()
+          }} disabled={loading}>
+            {loading ? '…' : '▶ Release to Queue'}
+          </button>
+        </div>
+      )}
+
       {task.status === 'blocked' && task.pendingQuestion && (
         <div className="task-question-box">
           <p className="dim" style={{ margin: '0 0 0.4rem', fontSize: '0.78rem' }}>Agent asks:</p>
@@ -1098,7 +1112,8 @@ export default function App() {
   const selectedTaskDetail = selectedTaskId ? taskById.get(selectedTaskId) : null
   const maxXp = userProfile?.xpToNext ?? xpToNextLevel(userProfile?.level ?? 1)
 
-  const activeTasks = tasks.filter((t) => t.status !== 'done')
+  const inboxTasks = tasks.filter((t) => t.status === 'new')
+  const activeTasks = tasks.filter((t) => t.status !== 'done' && t.status !== 'new')
   const doneTasks = tasks.filter((t) => t.status === 'done')
 
   return (
@@ -1111,6 +1126,7 @@ export default function App() {
         )}
         <div className="hud-stats">
           <span className="hud-stat">{agents.length} agents</span>
+          {inboxTasks.length > 0 && <span className="hud-stat" style={{ color: '#ffc107' }}>{inboxTasks.length} inbox</span>}
           <span className="hud-stat">{activeTasks.length} active tasks</span>
         </div>
       </header>
@@ -1178,6 +1194,18 @@ export default function App() {
                   <>
                     <NewTaskPanel projects={projects} squads={squads} onCreated={refetchTasks} />
                     <div className="task-list">
+                      {inboxTasks.length > 0 && (
+                        <>
+                          <p className="list-header">Inbox ({inboxTasks.length})</p>
+                          {inboxTasks.map((t) => (
+                            <TaskRow
+                              key={t.id}
+                              task={t}
+                              onClick={() => setSelectedTaskId(t.id)}
+                            />
+                          ))}
+                        </>
+                      )}
                       <p className="list-header">Active ({activeTasks.length})</p>
                       {activeTasks
                         .filter((t) => !t.parentTaskId || expandedEpics.has(t.parentTaskId))

@@ -18,6 +18,7 @@ import {
   approveTaskStage,
   retryStuckTask,
   restartTask,
+  releaseTask,
   listTaskStages,
   listChildTasks,
   setTaskWorktree,
@@ -358,6 +359,16 @@ export function buildApp(
     if (agentRow) {
       broadcast("global", { type: "agent:update", agentId: agentRow.id, station: "relaxation", taskId: null });
     }
+    return updated;
+  });
+
+  app.post("/tasks/:id/release", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const task = getTask(db, id);
+    if (!task) return reply.code(404).send({ error: "task not found" });
+    if (task.status !== "new") return reply.code(409).send({ error: "task is not in 'new' status" });
+    const updated = releaseTask(db, id);
+    broadcast(`task:${id}`, { type: "status", status: "queued", stage: updated!.stage });
     return updated;
   });
 

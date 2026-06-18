@@ -9,7 +9,7 @@ export type TaskStage =
   | "queued:merge"
   | "done";
 
-export type TaskStatus = "queued" | "running" | "blocked" | "awaiting_approval" | "stuck" | "done" | "error" | "split";
+export type TaskStatus = "new" | "queued" | "running" | "blocked" | "awaiting_approval" | "stuck" | "done" | "error" | "split";
 
 export type TaskSource = "human" | "github_issue";
 
@@ -46,6 +46,7 @@ export interface CreateTaskInput {
   source?: TaskSource;
   githubIssueNumber?: number;
   parentTaskId?: string;
+  initialStatus?: TaskStatus;
 }
 
 export interface TaskStageRecord {
@@ -100,7 +101,7 @@ export function createTask(db: DatabaseSync, input: CreateTaskInput): Task {
     description: input.description,
     priority,
     stage: "queued:prioritize",
-    status: "queued",
+    status: input.initialStatus ?? "new",
     requiresHumanReview: input.requiresHumanReview ? 1 : 0,
     reviewLoopCount: 0,
     worktreePath: null,
@@ -342,6 +343,7 @@ export function splitTask(
       priority: parent.priority,
       source: parent.source,
       parentTaskId: parentId,
+      initialStatus: "queued",
     });
     children.push(child);
   }
@@ -447,6 +449,16 @@ export function nextQueuedTaskForJobType(
       `SELECT * FROM tasks WHERE stage = ? AND status = 'queued' AND projectId IN (${placeholders}) ORDER BY priority DESC, createdAt ASC LIMIT 1`
     )
     .get(stage, ...projectIds) as Task | undefined;
+}
+
+export function releaseTask(db: DatabaseSync, id: string): Task | null {
+  const task = getTask(db, id);
+  if (!task || task.status !== "new") return null;
+  db.prepare(`UPDATE tasks SET status = 'queued', updatedAt = ? WHERE id = ?`).run(
+    new Date().toISOString(),
+    id
+  );
+  return getTask(db, id)!;
 }
 
 // ── Legacy helpers (kept for AgentRunner compat until Phase 2 rewrite) ──────
