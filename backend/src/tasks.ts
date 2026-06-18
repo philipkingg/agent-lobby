@@ -283,6 +283,17 @@ export function retryStuckTask(db: DatabaseSync, id: string): Task | null {
   return getTask(db, id)!;
 }
 
+export function restartTask(db: DatabaseSync, id: string): Task | null {
+  const task = getTask(db, id);
+  if (!task) return null;
+  db.prepare(
+    `UPDATE tasks SET stage = 'queued:prioritize', status = 'queued', reviewLoopCount = 0,
+     pendingQuestion = NULL, error = NULL, updatedAt = ? WHERE id = ?`
+  ).run(new Date().toISOString(), id);
+  db.prepare(`UPDATE agents SET currentTaskId = NULL WHERE currentTaskId = ?`).run(id);
+  return getTask(db, id)!;
+}
+
 export function deleteTask(db: DatabaseSync, id: string): void {
   db.prepare(`DELETE FROM transcript_entries WHERE taskId = ?`).run(id);
   db.prepare(`DELETE FROM task_stages WHERE taskId = ?`).run(id);

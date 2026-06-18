@@ -365,6 +365,15 @@ function TaskDetailPanel({ task, onClose, onRefresh }: { task: GameTask; onClose
     onRefresh()
   }
 
+  const restart = async () => {
+    if (!confirm(`Restart "${task.title}" from the beginning?`)) return
+    setLoading(true)
+    await fetch(`/api/tasks/${task.id}/restart`, { method: 'POST' })
+    setLoading(false)
+    onRefresh()
+    onClose()
+  }
+
   const deleteTask = async () => {
     if (!confirm(`Delete "${task.title}"?`)) return
     setLoading(true)
@@ -423,6 +432,14 @@ function TaskDetailPanel({ task, onClose, onRefresh }: { task: GameTask; onClose
       {task.status === 'stuck' && (
         <div className="task-action-row">
           <button onClick={retry} disabled={loading}>{loading ? '…' : 'Retry'}</button>
+        </div>
+      )}
+
+      {task.status !== 'running' && (
+        <div className="task-action-row">
+          <button onClick={restart} disabled={loading} style={{ fontSize: '0.75rem' }}>
+            {loading ? '…' : '↺ Restart from beginning'}
+          </button>
         </div>
       )}
 

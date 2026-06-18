@@ -17,6 +17,7 @@ import {
   deleteTask,
   approveTaskStage,
   retryStuckTask,
+  restartTask,
   listTaskStages,
   setTaskWorktree,
   type CreateTaskInput,
@@ -328,6 +329,15 @@ export function buildApp(
 
     const updated = retryStuckTask(db, id);
     broadcast(`task:${id}`, { type: "status", status: "queued", stage: updated!.stage });
+    return updated;
+  });
+
+  app.post("/tasks/:id/restart", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const task = getTask(db, id);
+    if (!task) return reply.code(404).send({ error: "task not found" });
+    const updated = restartTask(db, id);
+    broadcast(`task:${id}`, { type: "status", status: "queued", stage: "queued:prioritize" });
     return updated;
   });
 
