@@ -9,7 +9,7 @@ export type TaskStage =
   | "queued:merge"
   | "done";
 
-export type TaskStatus = "queued" | "running" | "blocked" | "awaiting_approval" | "stuck" | "done" | "error";
+export type TaskStatus = "queued" | "running" | "blocked" | "awaiting_approval" | "stuck" | "done" | "error" | "split";
 
 export type TaskSource = "human" | "github_issue";
 
@@ -32,6 +32,7 @@ export interface Task {
   sessionId: string | null;
   pendingQuestion: string | null;
   error: string | null;
+  parentTaskId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -44,6 +45,7 @@ export interface CreateTaskInput {
   requiresHumanReview?: boolean;
   source?: TaskSource;
   githubIssueNumber?: number;
+  parentTaskId?: string;
 }
 
 export interface TaskStageRecord {
@@ -109,13 +111,14 @@ export function createTask(db: DatabaseSync, input: CreateTaskInput): Task {
     sessionId: null,
     pendingQuestion: null,
     error: null,
+    parentTaskId: input.parentTaskId ?? null,
     createdAt: now,
     updatedAt: now,
   };
 
   db.prepare(
-    `INSERT INTO tasks (id, projectId, title, description, priority, stage, status, requiresHumanReview, reviewLoopCount, worktreePath, branch, prUrl, source, githubIssueNumber, sessionId, pendingQuestion, error, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO tasks (id, projectId, title, description, priority, stage, status, requiresHumanReview, reviewLoopCount, worktreePath, branch, prUrl, source, githubIssueNumber, sessionId, pendingQuestion, error, parentTaskId, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     task.id,
     task.projectId,
@@ -134,6 +137,7 @@ export function createTask(db: DatabaseSync, input: CreateTaskInput): Task {
     task.sessionId,
     task.pendingQuestion,
     task.error,
+    task.parentTaskId,
     task.createdAt,
     task.updatedAt
   );
@@ -298,10 +302,48 @@ export function restartTask(db: DatabaseSync, id: string): Task | null {
 }
 
 export function deleteTask(db: DatabaseSync, id: string): void {
+  // Cascade delete child tasks first
+  const children = db.prepare(`SELECT id FROM tasks WHERE parentTaskId = ?`).all(id) as { id: string }[];
+  for (const child of children) {
+    deleteTask(db, child.id);
+  }
   db.prepare(`DELETE FROM transcript_entries WHERE taskId = ?`).run(id);
   db.prepare(`DELETE FROM task_stages WHERE taskId = ?`).run(id);
   db.prepare(`UPDATE agents SET currentTaskId = NULL WHERE currentTaskId = ?`).run(id);
   db.prepare(`DELETE FROM tasks WHERE id = ?`).run(id);
+}
+
+export function listChildTasks(db: DatabaseSync, parentTaskId: string): Task[] {
+  return db
+    .prepare(`SELECT * FROM tasks WHERE parentTaskId = ? ORDER BY createdAt ASC`)
+    .all(parentTaskId) as Task[];
+}
+
+export function splitTask(
+  db: DatabaseSync,
+  parentId: string,
+  subtasks: { title: string; description: string }[]
+): Task[] {
+  const parent = getTask(db, parentId);
+  if (!parent) return [];
+
+  const now = new Date().toISOString();
+  const children: Task[] = [];
+
+  for (const sub of subtasks) {
+    const child = createTask(db, {
+      projectId: parent.projectId,
+      title: sub.title,
+      description: sub.description,
+      priority: parent.priority,
+      source: parent.source,
+      parentTaskId: parentId,
+    });
+    children.push(child);
+  }
+
+  db.prepare(`UPDATE tasks SET status = 'split', stage = 'done', updatedAt = ? WHERE id = ?`).run(now, parentId);
+  return children;
 }
 
 // --- Task stages ---

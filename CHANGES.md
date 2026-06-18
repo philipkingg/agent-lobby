@@ -4,6 +4,44 @@ This file tracks what has been built. Read it at the start of each new session f
 
 ---
 
+## Phase 7 — Epic / Ticket Splitting [DONE]
+
+**Goal:** Planners can split complex tasks into multiple subtasks (Jira-style epics). Each subtask goes through the full pipeline independently. Parent task is marked `split` and shows children in the UI.
+
+### What changed
+- `backend/src/db.ts` — bumped `SCHEMA_VERSION` to 3. Added `parentTaskId TEXT` column to tasks table in `applyV2Schema` and `migrateV1ToV2`. Added `migrateV2ToV3` (runs `ALTER TABLE tasks ADD COLUMN parentTaskId TEXT`). Updated `createDb` migration branching.
+- `backend/src/tasks.ts` — added `"split"` to `TaskStatus`. Added `parentTaskId: string | null` to `Task` interface + `CreateTaskInput`. Updated `createTask` INSERT to include `parentTaskId`. Added `listChildTasks(db, parentTaskId)`. Added `splitTask(db, parentId, subtasks[])`: creates child tasks with `parentTaskId` set, then sets parent `status = 'split', stage = 'done'`. Updated `deleteTask` to cascade delete children.
+- `backend/src/stage-prompts.ts` — updated `queued:plan` prompt to explain `SPLIT_EPIC:` output format. Planner outputs `SPLIT_EPIC: [{title, description}, ...]` for complex tasks; writes `PLAN_COMPLETE` for simple ones.
+- `backend/src/pipeline-runner.ts` — imported `splitTask`, `setTaskWorktree`, `getProject`, `createWorktree`, `branchName`. In `onStageSuccess`, when `stage === 'queued:plan'`, parses `SPLIT_EPIC:` JSON from result text (bracket-matching parser). If valid array with ≥2 entries: awards XP, calls `splitTask`, creates worktrees for each child, broadcasts `status: 'split'`, frees agent. Falls through to normal advance if JSON malformed.
+- `backend/src/app.ts` — imported `listChildTasks`. Added `GET /tasks/:id/children` endpoint.
+- `frontend/src/useGameState.ts` — added `parentTaskId: string | null` and `prUrl: string | null` to `GameTask` interface.
+- `frontend/src/App.tsx` — added `'split': '#9c27b0'` to `STATUS_COLOR`. Updated `TaskRow` to show purple `EPIC` badge for split tasks and `↳` prefix for child tasks. Updated `TaskDetailPanel`: fetches children for epic tasks (via `/tasks/:id/children`), fetches parent task info for child tasks (via `/tasks/:parentId`). Shows subtask list with clickable rows. Shows "Part of epic" link for children. Added `onSelectTask` prop to navigate between parent/child.
+
+### Key decisions
+- Planner decides complexity: the model decides whether to split based on task scope — no heuristic needed.
+- Children start at `queued:prioritize`: full pipeline runs (prioritizer sets score, planner creates implementation plan from the split description, implementer does the work). Clean, no special-casing.
+- Parent status `split`, stage `done`: scheduler ignores it, it shows in "active" task list with EPIC badge.
+- Bracket-matching JSON parser (not regex) for `SPLIT_EPIC:` value — handles nested objects in descriptions.
+- Cascade delete: deleting an epic deletes all children.
+- Worktrees created immediately for children (same as normal task creation).
+
+---
+
+## Phases 5 & 6 — UI Panels + Backend Enrichment [DONE]
+
+**Goal:** Task/agent detail panels, respond-to-question UI, PR wall, priority extraction, PR URL capture, personality display, project management, delete/restart tasks.
+
+### What changed (summary)
+- Phase 5: `TaskDetailPanel` (respond, approve, retry, delete, restart), `AgentDetailPanel` (fire, traits, level title, transcript toggle), `TranscriptView`, `PrWallTab`, `SettingsTab` with project add/delete + zoom sensitivity slider, canvas zoom overlay.
+- Phase 6: `setTaskPriority` via `PRIORITY: N` extraction in prioritize stage, `setTaskPrUrl` via GitHub PR URL regex in merge stage, personality trait pills, zoom sensitivity stored in state + passed as prop, `restartTask` clears agent station.
+- `backend/src/server.ts` — `autoStartScheduler: true` so scheduler runs on boot.
+
+### Key decisions
+- `restartTask` resets `stage='queued:prioritize', status='queued', reviewLoopCount=0, pendingQuestion=NULL, error=NULL` and clears agent `currentTaskId`/`currentStation` to relaxation.
+- Auto-start scheduler eliminates need for manual start on each `tsx watch` restart.
+
+---
+
 ## Phase 4 — Office Canvas Frontend (Steps 14–19) [DONE]
 
 **Goal:** Full UI rewrite — pixel-art office with station zones, animated character sprites, walk animation, real-time game state.

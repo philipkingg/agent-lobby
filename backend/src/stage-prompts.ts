@@ -18,17 +18,22 @@ PRIORITY: N
 `.trim(),
 
   "queued:plan": (task, project) => `
-You are a software planner. Create a clear implementation plan for:
+You are a software planner. Analyze this task:
 Title: ${task.title}
 Description: ${task.description}
 Repository: ${project.path}
 
-Read relevant parts of the codebase. Write a numbered implementation plan including:
+Read relevant parts of the codebase.
+
+If this task is COMPLEX (multiple independent features, distinct subsystems, or large enough that splitting into parallel streams is clearly better), split it into 2-5 subtasks. Output ONLY the following line and nothing else:
+SPLIT_EPIC: [{"title":"Subtask title","description":"Full implementation spec for this subtask"},...]
+
+If the task is SIMPLE or FOCUSED enough to implement in one pass, write a numbered implementation plan:
 - Files to create or modify
 - What changes to make in each file
 - Testing approach
 
-End your plan with: PLAN_COMPLETE
+End a non-split plan with: PLAN_COMPLETE
 `.trim(),
 
   "queued:implement": (task, project) => `

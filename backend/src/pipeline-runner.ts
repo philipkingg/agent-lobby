@@ -25,7 +25,11 @@ import {
   getTask,
   setTaskPriority,
   setTaskPrUrl,
+  splitTask,
+  setTaskWorktree,
 } from "./tasks.js";
+import { getProject } from "./projects.js";
+import { createWorktree, branchName } from "./worktrees.js";
 import { addTranscriptEntry } from "./transcripts.js";
 import type { Broadcast } from "./ws-events.js";
 import { buildStagePrompt, detectReviewOutcome } from "./stage-prompts.js";
@@ -231,6 +235,58 @@ export class PipelineRunner {
       const match = resultText.match(/PRIORITY:\s*([1-5])/i);
       if (match) {
         setTaskPriority(this.db, freshTask.id, parseInt(match[1], 10));
+      }
+    }
+
+    // Plan stage: planner may choose to split task into subtasks (epic split)
+    if (freshTask.stage === "queued:plan") {
+      const epicIdx = resultText.indexOf("SPLIT_EPIC:");
+      if (epicIdx !== -1) {
+        const afterKeyword = resultText.slice(epicIdx + "SPLIT_EPIC:".length).trimStart();
+        const startBracket = afterKeyword.indexOf("[");
+        if (startBracket !== -1) {
+          let depth = 0;
+          let endBracket = -1;
+          for (let i = startBracket; i < afterKeyword.length; i++) {
+            if (afterKeyword[i] === "[") depth++;
+            else if (afterKeyword[i] === "]") {
+              depth--;
+              if (depth === 0) { endBracket = i; break; }
+            }
+          }
+          if (endBracket !== -1) {
+            try {
+              const jsonStr = afterKeyword.slice(startBracket, endBracket + 1);
+              const subtasks = JSON.parse(jsonStr) as { title: string; description: string }[];
+              if (Array.isArray(subtasks) && subtasks.length >= 2) {
+                awardStageXp(this.db, agent.id, freshTask.stage, freshTask.priority, this.broadcast);
+                completeTaskStage(this.db, stageId, "done", 0);
+
+                const children = splitTask(this.db, freshTask.id, subtasks);
+
+                // Create a git worktree for each child task
+                const project = getProject(this.db, freshTask.projectId);
+                if (project) {
+                  for (const child of children) {
+                    try {
+                      const wtPath = createWorktree(project, child.id, child.title);
+                      const branch = branchName(child.id, child.title);
+                      setTaskWorktree(this.db, child.id, wtPath, branch);
+                    } catch {
+                      // not a git repo or worktree failed — child still usable
+                    }
+                  }
+                }
+
+                this.broadcast(`task:${freshTask.id}`, { type: "status", status: "split", stage: "done" });
+                this.freeAgent(agent.id, freshTask.id);
+                return;
+              }
+            } catch {
+              // JSON parse failed — fall through to normal plan advance
+            }
+          }
+        }
       }
     }
 

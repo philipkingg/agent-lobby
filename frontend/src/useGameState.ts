@@ -25,7 +25,9 @@ export interface GameTask {
   reviewLoopCount: number
   pendingQuestion: string | null
   branch: string | null
+  prUrl: string | null
   source: string
+  parentTaskId: string | null
   createdAt: string
   updatedAt: string
 }

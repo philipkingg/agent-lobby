@@ -30,6 +30,7 @@ function makeTask(db: ReturnType<typeof createDb>, worktreePath: string): Task {
     sessionId: null,
     pendingQuestion: null,
     error: null,
+    parentTaskId: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -37,13 +38,13 @@ function makeTask(db: ReturnType<typeof createDb>, worktreePath: string): Task {
   db.prepare(
     `INSERT INTO tasks
       (id, projectId, title, description, priority, stage, status, requiresHumanReview, reviewLoopCount,
-       worktreePath, branch, prUrl, source, githubIssueNumber, sessionId, pendingQuestion, error, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       worktreePath, branch, prUrl, source, githubIssueNumber, sessionId, pendingQuestion, error, parentTaskId, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     task.id, task.projectId, task.title, task.description, task.priority, task.stage, task.status,
     task.requiresHumanReview, task.reviewLoopCount, task.worktreePath, task.branch,
     task.prUrl, task.source, task.githubIssueNumber, task.sessionId, task.pendingQuestion,
-    task.error, task.createdAt, task.updatedAt
+    task.error, task.parentTaskId, task.createdAt, task.updatedAt
   );
 
   return task;

@@ -23,6 +23,7 @@ const STATUS_COLOR: Record<string, string> = {
   done: '#42a5f5',
   stuck: '#ef5350',
   error: '#ef5350',
+  split: '#9c27b0',
 }
 
 function XpBar({ xp, level, maxXp }: { xp: number; level: number; maxXp: number }) {
@@ -65,12 +66,16 @@ function AgentRow({ agent, task, onClick }: { agent: GameAgent; task: GameTask |
 
 function TaskRow({ task, onClick }: { task: GameTask; onClick: () => void }) {
   const color = STATUS_COLOR[task.status] ?? '#666'
+  const isEpic = task.status === 'split'
+  const isChild = !!task.parentTaskId
   return (
     <button className="task-row" onClick={onClick} type="button">
       <span className="task-row-title" title={task.title}>
-        {task.title.length > 30 ? task.title.slice(0, 30) + '…' : task.title}
+        {isEpic && <span style={{ color: '#9c27b0', fontSize: '0.7rem', fontWeight: 700, marginRight: '0.3rem' }}>EPIC</span>}
+        {isChild && <span style={{ color: '#666', fontSize: '0.7rem', marginRight: '0.25rem' }}>↳</span>}
+        {task.title.length > 28 ? task.title.slice(0, 28) + '…' : task.title}
       </span>
-      <span className="task-row-stage">{STAGE_LABELS[task.stage] ?? task.stage}</span>
+      <span className="task-row-stage">{isEpic ? 'Split' : (STAGE_LABELS[task.stage] ?? task.stage)}</span>
       <span className="task-row-status" style={{ color }}>{task.status}</span>
     </button>
   )
@@ -326,8 +331,15 @@ interface TaskStage {
   status: string; startedAt: string; completedAt: string | null
 }
 
-function TaskDetailPanel({ task, onClose, onRefresh }: { task: GameTask; onClose: () => void; onRefresh: () => void }) {
+function TaskDetailPanel({ task, onClose, onRefresh, onSelectTask }: {
+  task: GameTask
+  onClose: () => void
+  onRefresh: () => void
+  onSelectTask?: (id: string) => void
+}) {
   const [stages, setStages] = useState<TaskStage[]>([])
+  const [children, setChildren] = useState<GameTask[]>([])
+  const [parentTask, setParentTask] = useState<GameTask | null>(null)
   const [answer, setAnswer] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -337,6 +349,21 @@ function TaskDetailPanel({ task, onClose, onRefresh }: { task: GameTask; onClose
       .then(setStages)
       .catch(() => {})
   }, [task.id, task.status])
+
+  useEffect(() => {
+    if (task.status === 'split') {
+      fetch(`/api/tasks/${task.id}/children`)
+        .then((r) => r.ok ? r.json() : Promise.reject())
+        .then(setChildren)
+        .catch(() => {})
+    }
+    if (task.parentTaskId) {
+      fetch(`/api/tasks/${task.parentTaskId}`)
+        .then((r) => r.ok ? r.json() : Promise.reject())
+        .then(setParentTask)
+        .catch(() => {})
+    }
+  }, [task.id, task.status, task.parentTaskId])
 
   const respond = async () => {
     if (!answer.trim()) return
@@ -390,11 +417,15 @@ function TaskDetailPanel({ task, onClose, onRefresh }: { task: GameTask; onClose
   }
 
   const color = STATUS_COLOR[task.status] ?? '#666'
+  const isEpic = task.status === 'split'
 
   return (
     <div className="task-detail">
       <div className="task-detail-header">
-        <span className="task-detail-title">{task.title}</span>
+        <span className="task-detail-title">
+          {isEpic && <span style={{ color: '#9c27b0', fontSize: '0.72rem', fontWeight: 700, marginRight: '0.4rem' }}>EPIC</span>}
+          {task.title}
+        </span>
         <button
           onClick={deleteTask}
           disabled={loading}
@@ -406,9 +437,45 @@ function TaskDetailPanel({ task, onClose, onRefresh }: { task: GameTask; onClose
       </div>
       <div className="task-detail-meta">
         <span style={{ color }}>{task.status}</span>
-        <span className="dim">{STAGE_LABELS[task.stage] ?? task.stage}</span>
+        <span className="dim">{isEpic ? 'Split into subtasks' : (STAGE_LABELS[task.stage] ?? task.stage)}</span>
         <span className="dim">P{task.priority}</span>
       </div>
+
+      {parentTask && (
+        <div style={{ padding: '0.3rem 0', borderBottom: '1px solid var(--border)' }}>
+          <span className="dim" style={{ fontSize: '0.72rem' }}>Part of epic: </span>
+          <button
+            style={{ fontSize: '0.72rem', textDecoration: 'underline', color: '#9c27b0', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+            onClick={() => onSelectTask?.(parentTask.id)}
+          >
+            {parentTask.title}
+          </button>
+        </div>
+      )}
+
+      {isEpic && children.length > 0 && (
+        <div style={{ marginBottom: '0.5rem' }}>
+          <p className="list-header" style={{ margin: '0.4rem 0 0.25rem' }}>Subtasks ({children.length})</p>
+          {children.map((child) => {
+            const childColor = STATUS_COLOR[child.status] ?? '#666'
+            return (
+              <button
+                key={child.id}
+                className="task-row"
+                style={{ marginBottom: '2px' }}
+                onClick={() => onSelectTask?.(child.id)}
+                type="button"
+              >
+                <span className="task-row-title" title={child.title}>
+                  {child.title.length > 28 ? child.title.slice(0, 28) + '…' : child.title}
+                </span>
+                <span className="task-row-stage">{STAGE_LABELS[child.stage] ?? child.stage}</span>
+                <span className="task-row-status" style={{ color: childColor }}>{child.status}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {task.status === 'blocked' && task.pendingQuestion && (
         <div className="task-question-box">
@@ -663,6 +730,7 @@ export default function App() {
                     task={selectedTaskDetail}
                     onClose={() => setSelectedTaskId(null)}
                     onRefresh={refetchTasks}
+                    onSelectTask={(id) => setSelectedTaskId(id)}
                   />
                 ) : (
                   <>

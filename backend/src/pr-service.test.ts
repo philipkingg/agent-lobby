@@ -33,6 +33,7 @@ const task: Task = {
   sessionId: null,
   pendingQuestion: null,
   error: null,
+  parentTaskId: null,
   createdAt: now,
   updatedAt: now,
 };

@@ -4,7 +4,7 @@ const { DatabaseSync: DatabaseSyncImpl } = process.getBuiltinModule("node:sqlite
   DatabaseSync: typeof DatabaseSync;
 };
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 function getSchemaVersion(db: DatabaseSync): number {
   try {
@@ -101,6 +101,7 @@ function applyV2Schema(db: DatabaseSync): void {
       sessionId TEXT,
       pendingQuestion TEXT,
       error TEXT,
+      parentTaskId TEXT,
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     )
@@ -227,6 +228,7 @@ function migrateV1ToV2(db: DatabaseSync): void {
       sessionId TEXT,
       pendingQuestion TEXT,
       error TEXT,
+      parentTaskId TEXT,
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     )
@@ -272,6 +274,15 @@ function migrateV1ToV2(db: DatabaseSync): void {
   setSchemaVersion(db, SCHEMA_VERSION);
 }
 
+function migrateV2ToV3(db: DatabaseSync): void {
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN parentTaskId TEXT`);
+  } catch {
+    // column already exists
+  }
+  setSchemaVersion(db, 3);
+}
+
 export function createDb(path: string = ":memory:"): DatabaseSync {
   const db = new DatabaseSyncImpl(path);
 
@@ -286,8 +297,11 @@ export function createDb(path: string = ":memory:"): DatabaseSync {
 
   if (version === 0) {
     applyV2Schema(db);
-  } else if (version < SCHEMA_VERSION) {
+  } else if (version === 1) {
     migrateV1ToV2(db);
+    migrateV2ToV3(db);
+  } else if (version === 2) {
+    migrateV2ToV3(db);
   }
 
   return db;

@@ -19,6 +19,7 @@ import {
   retryStuckTask,
   restartTask,
   listTaskStages,
+  listChildTasks,
   setTaskWorktree,
   type CreateTaskInput,
 } from "./tasks.js";
@@ -297,6 +298,13 @@ export function buildApp(
     const task = getTask(db, id);
     if (!task) return reply.code(404).send({ error: "task not found" });
     return listTaskStages(db, id);
+  });
+
+  app.get("/tasks/:id/children", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const task = getTask(db, id);
+    if (!task) return reply.code(404).send({ error: "task not found" });
+    return listChildTasks(db, id);
   });
 
   app.get("/tasks/:id/transcript", async (request, reply) => {
