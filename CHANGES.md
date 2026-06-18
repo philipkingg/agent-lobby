@@ -4,7 +4,170 @@ This file tracks what has been built. Read it at the start of each new session f
 
 ---
 
-## Phase 13 — PR-Based Review Flow [TODO]
+## Phase 22 — LimeZu Tilemap Rendering [TODO]
+
+**Goal:** Replace solid colored station rectangles with actual LimeZu Modern Interiors tile sprites. Makes the office look like a real pixel-art game instead of colored boxes.
+
+### What changes
+- **`frontend/src/OfficeCanvas.tsx`** — Load `Room_Builder_free_16x16.png` as spritesheet. Render tiled floor + walls using a tilemap or manual sprite grid. Replace `drawStationBg` colored rectangles with furniture sprites from `Interiors_free_16x16.png` (desks, planning board, couch, meeting table, PR pinboard).
+- **`frontend/src/office-layout.ts`** — Add tile coordinate data for each station's furniture pieces. Map station zones to sets of furniture sprite positions.
+- Asset files already exist in `public/sprites/`.
+
+### Key decisions
+- Tile size: 16×16px, render at 3× scale (matches character sprites)
+- Use `Sprite` grid, not a full tilemap engine — simpler, sufficient for fixed layout
+- Furniture placement hardcoded to match station zone bounds from `office-layout.ts`
+- Floor tiles: `Room_Builder_free_16x16.png` rows/cols for wood planks or carpet
+- Biggest effort item — tackle last
+
+---
+
+## Phase 21 — Prioritizer Batch Re-Scan [TODO]
+
+**Goal:** When a Prioritizer agent is idle (no `queued:prioritize` tasks), it walks to the Planning Board and re-scores all currently queued tasks. Keeps priorities fresh as context changes.
+
+### What changes
+- **`backend/src/scheduler.ts`** — When a prioritizer's `nextQueuedTaskForJobType` returns nothing but the agent is idle, create a synthetic "re-score queue" task: set agent to `planning` station, build a prompt listing all `status='queued'` task titles+descriptions, ask for a JSON priority map `{taskId: N}`, apply updates via `setTaskPriority`.
+- **`backend/src/stage-prompts.ts`** — Add a `"queue:rescore"` pseudo-stage prompt that presents the full queue for batch re-scoring.
+- **`frontend/src/App.tsx`** — No change needed; priority updates broadcast via existing `status` WS event.
+
+### Key decisions
+- Re-score runs at most once per scheduler tick per prioritizer
+- Only rescores tasks with `status='queued'` (not running/blocked/done)
+- Throttle: don't re-score if last re-score was < 5 min ago (store timestamp in settings table)
+
+---
+
+## Phase 20 — Office Level Gates [TODO]
+
+**Goal:** Available desk slots in the canvas grow as user XP level increases. Prevents hiring 10 agents when you're only level 1. Scheduler enforces the cap.
+
+### What changes
+- **`frontend/src/office-layout.ts`** — Add `levelRequired` to each slot in `desks.slots`. Level 1: 3 slots, Level 3: 6 slots, Level 5: 9 slots (all).
+- **`frontend/src/OfficeCanvas.tsx`** — Accept `userLevel` prop. Only render desk slots where `slot.levelRequired <= userLevel`. Locked slots shown as dimmed/grayed furniture placeholder.
+- **`backend/src/scheduler.ts`** — Before dispatching, count running tasks. If `running >= unlockedDeskCount(userLevel)`, skip dispatch. Read user level from `user_profile`.
+- **`frontend/src/App.tsx`** — Pass `userProfile?.level` to `OfficeCanvas`.
+
+### Key decisions
+- Slot unlock thresholds: L1=3, L3=6, L5=9 (tune later)
+- Scheduler cap applies to all implementer/reviewer/merger desks combined, not per job type
+- Meeting room + planning board slots not gated (those aren't desks)
+
+---
+
+## Phase 19 — Pipeline Column View [TODO]
+
+**Goal:** Replace the flat task list with a 6-column Kanban view (Prioritize / Plan / Implement / Review / Merge / Done). Each column shows tasks at that stage. Drag within a column re-orders priority.
+
+### What changes
+- **`frontend/src/App.tsx`** — Replace `<div className="task-list">` in tasks tab with a horizontal `<div className="pipeline-board">`. Six `<div className="pipeline-col">` columns, one per stage. Tasks rendered as cards in their column. Drag-and-drop via `onDragStart`/`onDrop` HTML5 API: reorder within column updates `priority` via `PUT /tasks/:id` or a new `POST /tasks/:id/priority` endpoint.
+- **`frontend/src/App.css`** — Add `.pipeline-board` (flex row, overflow-x scroll), `.pipeline-col` (flex col, min-width), `.pipeline-col-header`, `.task-card` styles.
+- **`backend/src/app.ts`** — Add `PATCH /tasks/:id` endpoint accepting `{ priority: N }`.
+
+### Key decisions
+- Board is horizontal scroll, not truncated — all 6 columns always visible
+- Inbox (new) tasks shown as a 0th column before Prioritize
+- Epics show in whichever column their stage is; children shown indented under parent within same column
+- Keep existing task detail panel on click
+
+---
+
+## Phase 18 — Settings: Model Per Job Type + Auto-Merge [TODO]
+
+**Goal:** Let the user configure which Claude model each job type uses, and toggle auto-merge per project. Persisted in the `settings` table.
+
+### What changes
+- **`frontend/src/App.tsx` — `SettingsTab`** — Add "Agent Models" section: dropdown per job type (`prioritizer`, `planner`, `implementer`, `reviewer`, `merger`, `auditor`) selecting from a list of Claude model IDs. Save via `POST /settings`. Add "Auto-Merge" toggle per project row.
+- **`backend/src/agents.ts`** — `JOB_MODELS` constant currently hardcodes model per type. Change to read from `settings` table at hire time (with hardcoded defaults as fallback).
+- **`backend/src/app.ts`** — `POST /projects/:id` (or extend existing PUT) to set `autoMerge` flag. Alternatively add to settings.
+- **`backend/src/pipeline-runner.ts`** — Check project `autoMerge` flag before advancing to `queued:merge`; if false, mark task done after review approval without merging.
+
+### Key decisions
+- Settings are per-installation (not per-agent); all future hires of a job type use the current model setting
+- Model list: hardcode a small curated list (haiku-4-5, sonnet-4-6, opus-4-8, fable-5)
+- Auto-merge off: task goes to `done` after reviewer approves, no merger stage
+
+---
+
+## Phase 17 — CI Check Before Merge [TODO]
+
+**Goal:** Merger checks CI status on the PR before merging. Re-queues on pending, errors on CI fail. Prevents broken code landing on main.
+
+### What changes
+- **`backend/src/stage-prompts.ts`** — Merger prompt: add step to run `gh pr view --json statusCheckRollup,reviewDecision --jq` before merging. Output `CI_PENDING` if checks still running, `CI_FAILED: <reason>` if failing, proceed to merge only on success or no checks.
+- **`backend/src/pipeline-runner.ts`** — In `onStageSuccess` for merge stage: detect `CI_PENDING` in result → re-queue task at `queued:merge` after delay (store retry timestamp in settings or just re-queue immediately and let scheduler pick up after interval). Detect `CI_FAILED:` → set task `error`.
+- **`agents/merger.md`** — Add CI check step before merge command.
+
+### Key decisions
+- Re-queue on CI pending: task goes back to `queued:merge`, scheduler re-picks after next tick (5s) — fast enough unless CI takes hours
+- CI failed = task error, human must retry or fix branch manually
+- If repo has no CI configured (no status checks), merger proceeds immediately
+
+---
+
+## Phase 16 — Agent Level Badge on Sprite [TODO]
+
+**Goal:** Agent sprites show their level number as a small badge. Level-up triggers a visual flash. L3+ gets an alternate idle animation. Makes progression visible in the canvas.
+
+### What changes
+- **`frontend/src/OfficeCanvas.tsx`** — In `AgentSprite`: render a small level badge (`pixiText` with level number) below the name label. On level change (detect via `agent.level` prop change in `useEffect`), briefly set a `flashing` state that tints the sprite white for 0.5s.
+- **`frontend/src/OfficeCanvas.tsx`** — `getAnimKey`: at L3+, return `'phone'` for relaxation station instead of `'idle_anim'` (agents look more "senior" when resting).
+- **`frontend/src/useGameState.ts`** — Already has `agent.level` in `GameAgent`. WS `agent:xp` event already updates it.
+
+### Key decisions
+- Badge style: small dark rounded rect with level number, bottom-left of sprite, monospace 8px
+- Flash: white tint via pixi `tint` property set to `0xffffff` then lerped back over 30 frames
+- L5+: gold tint on badge (not full sprite) to signal "principal" tier
+- No new sprite sheet frames needed — uses existing assets
+
+---
+
+## Phase 15 — PR Wall Canvas Content [TODO]
+
+**Goal:** The PR Wall station zone on the canvas shows live PR data — open/merged PRs as mini-cards pinned to the wall. Makes the canvas feel like a real office with a project status board.
+
+### What changes
+- **`backend/src/app.ts`** — Add `GET /pr-wall` endpoint: returns recent tasks with `prUrl != NULL` (last 10, any status), including `title`, `prUrl`, `status`, `branch`.
+- **`frontend/src/OfficeCanvas.tsx`** — Load PR wall data via `fetch('/api/pr-wall')` (or accept as prop from `App`). In `PixiScene`, render mini PR cards inside the `pr-wall` station zone: `pixiText` for title (truncated), colored dot for status (open=amber, merged=green), small PR number badge. Cards stack vertically within the zone.
+- **`frontend/src/App.tsx`** — Fetch PR wall data in `useGameState` or pass `tasks` to `OfficeCanvas` (tasks already passed — filter in canvas).
+
+### Key decisions
+- Simpler: pass `tasks` (already available) to OfficeCanvas, filter `prUrl != null` in the component — no new endpoint needed
+- Max 6 cards shown (fits the station zone height)
+- Click on PR card: open `prUrl` in new tab via canvas click handler
+- Cards re-render on task WS updates automatically
+
+---
+
+## Phase 14 — CHANGES.md Auto-Update [TODO]
+
+**Goal:** When a task pipeline reaches `done`, automatically append an entry to `CHANGES.md` in the project repo. Creates a living changelog without human effort.
+
+### What changes
+- **`backend/src/pipeline-runner.ts`** — In `onStageSuccess`, when `advanced?.stage === 'done'` (or `next === null`): call a new `appendChangelog(project, task, stages)` function.
+- **`backend/src/changelog-service.ts`** — New file. `appendChangelog(project, task, db)`: reads `task_stages` to get agent names per stage, reads agent names from agents table, appends entry to `{project.path}/CHANGES.md`:
+  ```
+  ## {date} — {task.title}
+  - Branch: {branch}
+  - PR: {prUrl ?? 'n/a'}
+  - Pipeline: {planner.name} → {implementer.name} → {reviewer.name} → {merger.name}
+  - XP earned: {sum of xpAwarded from task_stages}
+  ```
+- Write is fire-and-forget (don't block stage completion on file write).
+
+### Key decisions
+- Append to project's CHANGES.md (not the agent-lobby repo's CHANGES.md) — tracks work done on the managed project
+- If CHANGES.md doesn't exist, create it with a header
+- Agent attribution: join task_stages → agents by agentId, group by stage type
+- Queue writes if concurrent completions (use a per-project write lock or just accept last-write-wins for now)
+
+---
+
+## Phase 13 — PR-Based Review Flow [DONE]
+
+Implementer pushes branch + creates PR (`gh pr create`) and outputs `PR_URL: <url>`. Pipeline runner extracts and stores it. Reviewer uses `gh pr diff` + `gh pr review --approve/--request-changes` on the actual PR. Merger just does `gh pr merge --squash` (PR already exists). Updated `agents/implementer.md`, `reviewer.md`, `merger.md` to match.
+
+---
 
 **Goal:** Implementer creates a real GitHub PR when implementation is done. Reviewer reviews it by reading the actual PR diff and leaving inline comments via `gh`. Review feedback travels through the PR, not just through the agent prompt. Implementer is re-dispatched to address those comments.
 
@@ -37,7 +200,11 @@ This file tracks what has been built. Read it at the start of each new session f
 
 ---
 
-## Phase 12 — Task Lifecycle: New → Ready Gate [TODO]
+## Phase 12 — Task Lifecycle: New → Ready Gate [DONE]
+
+New tasks start with `status='new'`, invisible to scheduler. `POST /tasks/:id/release` moves to `queued:prioritize`. Epic children auto-queue (system-created). Frontend shows Inbox section above Active, HUD badge for inbox count, "Release to Queue" button in task detail panel. `tasks.ts` has new `releaseTask()` fn. No DB migration needed (status is unconstrained TEXT).
+
+---
 
 **Goal:** Tasks created by the user start in `new` status and are invisible to the scheduler. User explicitly moves them to `ready` to allow agent pickup. Prevents agents from immediately grabbing half-formed tickets.
 
@@ -56,7 +223,11 @@ This file tracks what has been built. Read it at the start of each new session f
 
 ---
 
-## Phase 11 — UI Improvements [TODO]
+## Phase 11 — UI Improvements [DONE]
+
+AgentDetailPanel moved above HireAgentPanel + agent list so it's visible without scrolling. Epic tasks show ▶/▼ toggle in active task list; children hidden until expanded. NewTaskPanel has priority 1–5 buttons, requiresHumanReview checkbox, squad dropdown. HireAgentPanel includes auditor option.
+
+---
 
 **Goal:** Several small but important UI fixes and additions.
 
