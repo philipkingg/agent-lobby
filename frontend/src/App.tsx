@@ -69,12 +69,24 @@ function AgentRow({ agent, task, squadName, onClick }: { agent: GameAgent; task:
   )
 }
 
-function TaskRow({ task, onClick }: { task: GameTask; onClick: () => void }) {
+function TaskRow({ task, onClick, onToggle, expanded }: {
+  task: GameTask; onClick: () => void
+  onToggle?: (e: React.MouseEvent) => void
+  expanded?: boolean
+}) {
   const color = STATUS_COLOR[task.status] ?? '#666'
   const isEpic = task.status === 'split'
   const isChild = !!task.parentTaskId
   return (
     <button className="task-row" onClick={onClick} type="button">
+      {isEpic && onToggle && (
+        <span
+          onClick={onToggle}
+          style={{ fontSize: '0.65rem', color: '#9c27b0', marginRight: '0.2rem', userSelect: 'none', cursor: 'pointer', flexShrink: 0 }}
+        >
+          {expanded ? '▼' : '▶'}
+        </span>
+      )}
       <span className="task-row-title" title={task.title}>
         {isEpic && <span style={{ color: '#9c27b0', fontSize: '0.7rem', fontWeight: 700, marginRight: '0.3rem' }}>EPIC</span>}
         {isChild && <span style={{ color: '#666', fontSize: '0.7rem', marginRight: '0.25rem' }}>↳</span>}
@@ -109,6 +121,7 @@ function HireAgentPanel({ onHired }: { onHired: () => void }) {
         <option value="implementer">Implementer</option>
         <option value="reviewer">Reviewer</option>
         <option value="merger">Merger</option>
+        <option value="auditor">Auditor</option>
       </select>
       <button className="btn-primary" onClick={hire} disabled={loading}>
         {loading ? 'Hiring…' : 'Hire Agent'}
@@ -117,10 +130,13 @@ function HireAgentPanel({ onHired }: { onHired: () => void }) {
   )
 }
 
-function NewTaskPanel({ projects, onCreated }: { projects: Project[]; onCreated: () => void }) {
+function NewTaskPanel({ projects, squads, onCreated }: { projects: Project[]; squads: Squad[]; onCreated: () => void }) {
   const [projectId, setProjectId] = useState(projects[0]?.id ?? '')
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
+  const [priority, setPriority] = useState(3)
+  const [requiresHumanReview, setRequiresHumanReview] = useState(false)
+  const [squadId, setSquadId] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -133,7 +149,14 @@ function NewTaskPanel({ projects, onCreated }: { projects: Project[]; onCreated:
     const res = await fetch('/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId, title: title.trim(), description: description.trim() }),
+      body: JSON.stringify({
+        projectId,
+        title: title.trim(),
+        description: description.trim(),
+        priority,
+        requiresHumanReview,
+        squadId: squadId || undefined,
+      }),
     })
     setLoading(false)
     if (!res.ok) {
@@ -143,6 +166,9 @@ function NewTaskPanel({ projects, onCreated }: { projects: Project[]; onCreated:
     }
     setTitle('')
     setDescription('')
+    setPriority(3)
+    setRequiresHumanReview(false)
+    setSquadId('')
     onCreated()
   }
 
@@ -163,6 +189,43 @@ function NewTaskPanel({ projects, onCreated }: { projects: Project[]; onCreated:
         onChange={(e) => setDescription(e.target.value)}
         rows={3}
       />
+      <div className="new-task-row">
+        <label style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>Priority</label>
+        <div style={{ display: 'flex', gap: '0.2rem' }}>
+          {[1,2,3,4,5].map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setPriority(p)}
+              style={{
+                width: 26, height: 26, padding: 0, fontSize: '0.72rem',
+                background: priority === p ? 'var(--accent)' : undefined,
+                color: priority === p ? '#fff' : undefined,
+                borderColor: priority === p ? 'var(--accent)' : undefined,
+              }}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="new-task-row">
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.72rem', color: 'var(--text-dim)', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={requiresHumanReview}
+            onChange={(e) => setRequiresHumanReview(e.target.checked)}
+            style={{ accentColor: 'var(--accent)' }}
+          />
+          Require human approval at each stage
+        </label>
+      </div>
+      {squads.length > 0 && (
+        <select value={squadId} onChange={(e) => setSquadId(e.target.value)}>
+          <option value="">No squad (any agent)</option>
+          {squads.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+      )}
       {error && <p className="error">{error}</p>}
       <button className="btn-primary" type="submit" disabled={loading}>
         {loading ? 'Creating…' : 'Create Task'}
@@ -1025,6 +1088,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('agents')
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const [expandedEpics, setExpandedEpics] = useState<Set<string>>(new Set())
   const [zoomSensitivity, setZoomSensitivity] = useState(0.08)
 
   const taskById = new Map(tasks.map((t) => [t.id, t]))
@@ -1077,6 +1141,14 @@ export default function App() {
           <div className="tab-content">
             {tab === 'agents' && (
               <div className="agents-tab">
+                {selectedAgent && (
+                  <AgentDetailPanel
+                    agent={selectedAgent}
+                    task={selectedTask ?? null}
+                    onFire={refetchAgents}
+                    onClose={() => setSelectedAgentId(null)}
+                  />
+                )}
                 <HireAgentPanel onHired={refetchAgents} />
                 <div className="agent-list">
                   {agents.length === 0 && <p className="dim">No agents hired yet.</p>}
@@ -1090,15 +1162,6 @@ export default function App() {
                     />
                   ))}
                 </div>
-
-                {selectedAgent && (
-                  <AgentDetailPanel
-                    agent={selectedAgent}
-                    task={selectedTask ?? null}
-                    onFire={refetchAgents}
-                    onClose={() => setSelectedAgentId(null)}
-                  />
-                )}
               </div>
             )}
 
@@ -1113,16 +1176,30 @@ export default function App() {
                   />
                 ) : (
                   <>
-                    <NewTaskPanel projects={projects} onCreated={refetchTasks} />
+                    <NewTaskPanel projects={projects} squads={squads} onCreated={refetchTasks} />
                     <div className="task-list">
                       <p className="list-header">Active ({activeTasks.length})</p>
-                      {activeTasks.map((t) => (
-                        <TaskRow
-                          key={t.id}
-                          task={t}
-                          onClick={() => { setSelectedTaskId(t.id); }}
-                        />
-                      ))}
+                      {activeTasks
+                        .filter((t) => !t.parentTaskId || expandedEpics.has(t.parentTaskId))
+                        .map((t) => {
+                          const isEpic = t.status === 'split'
+                          return (
+                            <TaskRow
+                              key={t.id}
+                              task={t}
+                              onClick={() => setSelectedTaskId(t.id)}
+                              onToggle={isEpic ? (e) => {
+                                e.stopPropagation()
+                                setExpandedEpics((prev) => {
+                                  const next = new Set(prev)
+                                  if (next.has(t.id)) next.delete(t.id) else next.add(t.id)
+                                  return next
+                                })
+                              } : undefined}
+                              expanded={isEpic ? expandedEpics.has(t.id) : undefined}
+                            />
+                          )
+                        })}
                       {doneTasks.length > 0 && (
                         <>
                           <p className="list-header">Done ({doneTasks.length})</p>
