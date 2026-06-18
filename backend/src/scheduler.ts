@@ -25,6 +25,10 @@ export class AgentScheduler {
     private intervalMs = 5000
   ) {}
 
+  get isRunning(): boolean {
+    return this.timer !== null;
+  }
+
   start(): void {
     if (this.timer) return;
     this.timer = setInterval(() => { void this.tick(); }, this.intervalMs);

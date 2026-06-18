@@ -848,11 +848,12 @@ function SquadsTab({ squads, agents, projects, onRefresh }: {
   )
 }
 
-function SettingsTab({ onRefresh, zoomSensitivity, onZoomSensitivity, projects }: {
+function SettingsTab({ onRefresh, zoomSensitivity, onZoomSensitivity, projects, onSchedulerChange }: {
   onRefresh: () => void
   zoomSensitivity: number
   onZoomSensitivity: (v: number) => void
   projects: Project[]
+  onSchedulerChange: (running: boolean) => void
 }) {
   const [loading, setLoading] = useState(false)
   const [projectPath, setProjectPath] = useState('')
@@ -899,8 +900,8 @@ function SettingsTab({ onRefresh, zoomSensitivity, onZoomSensitivity, projects }
     onRefresh()
   }
 
-  const startScheduler = () => fetch('/api/scheduler/start', { method: 'POST' }).then(onRefresh)
-  const stopScheduler = () => fetch('/api/scheduler/stop', { method: 'POST' }).then(onRefresh)
+  const startScheduler = () => fetch('/api/scheduler/start', { method: 'POST' }).then(() => { onSchedulerChange(true); onRefresh() })
+  const stopScheduler = () => fetch('/api/scheduler/stop', { method: 'POST' }).then(() => { onSchedulerChange(false); onRefresh() })
 
   return (
     <div className="settings-tab">
@@ -1104,6 +1105,16 @@ export default function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [expandedEpics, setExpandedEpics] = useState<Set<string>>(new Set())
   const [zoomSensitivity, setZoomSensitivity] = useState(0.08)
+  const [schedulerRunning, setSchedulerRunning] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    const fetchStatus = () =>
+      fetch('/api/scheduler/status')
+        .then((r) => r.ok ? r.json() : Promise.reject())
+        .then((d: { running: boolean }) => setSchedulerRunning(d.running))
+        .catch(() => {})
+    void fetchStatus()
+  }, [])
 
   const taskById = new Map(tasks.map((t) => [t.id, t]))
   const squadById = new Map(squads.map((s) => [s.id, s]))
@@ -1128,6 +1139,18 @@ export default function App() {
           <span className="hud-stat">{agents.length} agents</span>
           {inboxTasks.length > 0 && <span className="hud-stat" style={{ color: '#ffc107' }}>{inboxTasks.length} inbox</span>}
           <span className="hud-stat">{activeTasks.length} active tasks</span>
+          {schedulerRunning !== null && (
+            <span className="hud-stat" style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+              <span style={{
+                width: 8, height: 8, borderRadius: '50%',
+                background: schedulerRunning ? '#4caf50' : '#ef5350',
+                display: 'inline-block', flexShrink: 0,
+              }} />
+              <span style={{ color: schedulerRunning ? '#4caf50' : '#ef5350' }}>
+                {schedulerRunning ? 'Scheduler ON' : 'Scheduler OFF'}
+              </span>
+            </span>
+          )}
         </div>
       </header>
 
@@ -1252,7 +1275,7 @@ export default function App() {
 
             {tab === 'audit' && <AuditTab suggestions={suggestions} onRefresh={refetchSuggestions} />}
 
-            {tab === 'settings' && <SettingsTab onRefresh={refetchAll} zoomSensitivity={zoomSensitivity} onZoomSensitivity={setZoomSensitivity} projects={projects} />}
+            {tab === 'settings' && <SettingsTab onRefresh={refetchAll} zoomSensitivity={zoomSensitivity} onZoomSensitivity={setZoomSensitivity} projects={projects} onSchedulerChange={setSchedulerRunning} />}
           </div>
         </aside>
       </div>

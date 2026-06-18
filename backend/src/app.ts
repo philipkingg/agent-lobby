@@ -465,6 +465,10 @@ export function buildApp(
     return { ok: true, status: "stopped" };
   });
 
+  app.get("/scheduler/status", async () => {
+    return { running: scheduler.isRunning };
+  });
+
   app.post("/scheduler/tick", async () => {
     await scheduler.tick();
     return { ok: true };
