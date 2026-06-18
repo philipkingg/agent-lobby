@@ -1,7 +1,20 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import type { Task, TaskStage } from "./tasks.js";
 import type { Project } from "./projects.js";
 import type { Agent } from "./agents.js";
 import { parsePersonality, buildPersonalityPrompt } from "./agents.js";
+
+const AGENTS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "agents");
+
+function readKnowledgeFile(jobType: string): string {
+  try {
+    return readFileSync(path.join(AGENTS_DIR, `${jobType}.md`), "utf-8").trim();
+  } catch {
+    return "";
+  }
+}
 
 type PromptBuilder = (task: Task, project: Project) => string;
 
@@ -92,11 +105,14 @@ export function buildStagePrompt(task: Task, project: Project, agent: Agent, rev
   const personality = parsePersonality(agent);
   const personalityText = buildPersonalityPrompt(personality);
 
+  const knowledge = readKnowledgeFile(agent.jobType);
+  const knowledgeSection = knowledge ? `${knowledge}\n\n---\n\n` : "";
+
   const feedbackSection = reviewFeedback
     ? `\n\nPREVIOUS REVIEW FEEDBACK — you MUST address these specific issues before finishing:\n\n${reviewFeedback}`
     : "";
 
-  return base + feedbackSection + personalityText;
+  return knowledgeSection + base + feedbackSection + personalityText;
 }
 
 // Detect a review rejection in the result text

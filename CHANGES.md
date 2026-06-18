@@ -135,7 +135,7 @@ Epics (tasks with `status = 'split'`) should render as collapsible headers in th
 
 ---
 
-## Phase 9 — Agent Knowledge Files [TODO]
+## Phase 9 — Agent Knowledge Files [DONE]
 
 **Goal:** Give each agent type a persistent knowledge file (`agent-{type}.md`) that is injected into their stage prompt. Acts like onboarding docs — common lookup patterns, codebase conventions, file structure, testing approach, gotchas. Agents stop wasting tokens re-discovering the same things every run.
 
