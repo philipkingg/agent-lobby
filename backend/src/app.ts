@@ -336,8 +336,13 @@ export function buildApp(
     const { id } = request.params as { id: string };
     const task = getTask(db, id);
     if (!task) return reply.code(404).send({ error: "task not found" });
+    // Find agent on this task before clearing
+    const agentRow = db.prepare(`SELECT id FROM agents WHERE currentTaskId = ?`).get(id) as { id: string } | undefined;
     const updated = restartTask(db, id);
     broadcast(`task:${id}`, { type: "status", status: "queued", stage: "queued:prioritize" });
+    if (agentRow) {
+      broadcast("global", { type: "agent:update", agentId: agentRow.id, station: "relaxation", taskId: null });
+    }
     return updated;
   });
 

@@ -290,7 +290,10 @@ export function restartTask(db: DatabaseSync, id: string): Task | null {
     `UPDATE tasks SET stage = 'queued:prioritize', status = 'queued', reviewLoopCount = 0,
      pendingQuestion = NULL, error = NULL, updatedAt = ? WHERE id = ?`
   ).run(new Date().toISOString(), id);
-  db.prepare(`UPDATE agents SET currentTaskId = NULL WHERE currentTaskId = ?`).run(id);
+  // Clear task from any agent, and move that agent to relaxation
+  db.prepare(
+    `UPDATE agents SET currentTaskId = NULL, currentStation = 'relaxation' WHERE currentTaskId = ?`
+  ).run(id);
   return getTask(db, id)!;
 }
 
