@@ -4,6 +4,44 @@ This file tracks what has been built. Read it at the start of each new session f
 
 ---
 
+## Phase 9 — Agent Knowledge Files [TODO]
+
+**Goal:** Give each agent type a persistent knowledge file (`agent-{type}.md`) that is injected into their stage prompt. Acts like onboarding docs — common lookup patterns, codebase conventions, file structure, testing approach, gotchas. Agents stop wasting tokens re-discovering the same things every run.
+
+### One file per job type
+
+| File | Agent | Purpose |
+|------|-------|---------|
+| `agents/prioritizer.md` | Prioritizer | Scoring rubric, what signals raise/lower priority, output format rules |
+| `agents/planner.md` | Planner | Codebase map (key files/dirs), how to read the repo before planning, SPLIT_EPIC format, PLAN_COMPLETE format, what makes a good vs bad subtask split |
+| `agents/implementer.md` | Implementer | File structure conventions, how to find the right files, commit message style, conflict resolution steps, testing requirements, branch hygiene |
+| `agents/reviewer.md` | Reviewer | What to check (correctness, tests, style, security), how to diff, APPROVE vs REQUEST_CHANGES format, what's a blocking vs non-blocking issue |
+| `agents/merger.md` | Merger | PR creation steps, auto-merge flags, how to verify the branch is conflict-free before pushing, what to do when push is rejected |
+
+### What each file should contain
+
+- **Codebase map** (implementer/planner): top-level dirs, what lives where, key entry points
+- **Conventions**: naming, file structure, import style, commit format
+- **Common commands**: how to run tests, how to lint, how to build
+- **Output format reminders**: exact keywords the pipeline runner looks for (PRIORITY: N, PLAN_COMPLETE, SPLIT_EPIC, APPROVE, REQUEST_CHANGES, MERGED)
+- **Gotchas**: things that trip agents up — e.g. worktree is a sibling dir not the main repo, always pull before pushing, do not commit .env files
+- **Testing**: how tests are run, where test files live, what coverage is expected
+
+### Implementation steps
+
+1. Create `agents/` directory at project root (sibling to `backend/` and `frontend/`)
+2. Write each `.md` file with the above sections, tailored to the job type
+3. In `stage-prompts.ts`, read the relevant `agent-{type}.md` file at prompt build time and append after the base prompt + personality (or prepend as a "system" section)
+4. Cache the file reads — read once at startup, not per-stage invocation
+5. Make files editable at runtime: if a file changes, the next stage invocation picks it up (no restart needed — just re-read on each `buildStagePrompt` call, OS caches the file anyway)
+
+### Key decisions to make during implementation
+- Where to mount the knowledge: prepend (agent reads it before task) vs append (task context first, then constraints) — likely prepend since it's "rules" not "context"
+- Whether to version the files in git (yes — they are code, not config)
+- Whether agents should be able to update their own knowledge files (interesting future feature — agents that improve their own docs — defer)
+
+---
+
 ## Phase 8 — Squad Management UI [DONE]
 
 **Goal:** Build the Squad tab so you can create squads, assign agents to them, and assign projects. Agents in a squad only pick up tasks for that squad's projects (enforced by AgentScheduler).
