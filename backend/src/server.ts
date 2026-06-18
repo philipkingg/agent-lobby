@@ -7,7 +7,7 @@ const dataDir = path.resolve("data");
 mkdirSync(dataDir, { recursive: true });
 
 const db = createDb(path.join(dataDir, "agent-office.db"));
-const app = buildApp(db);
+const app = buildApp(db, { autoStartScheduler: true });
 
 app.listen({ port: 3001 }, (err, address) => {
   if (err) {

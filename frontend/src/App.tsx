@@ -368,7 +368,13 @@ function TaskDetailPanel({ task, onClose, onRefresh }: { task: GameTask; onClose
   const restart = async () => {
     if (!confirm(`Restart "${task.title}" from the beginning?`)) return
     setLoading(true)
-    await fetch(`/api/tasks/${task.id}/restart`, { method: 'POST' })
+    const res = await fetch(`/api/tasks/${task.id}/restart`, { method: 'POST' })
+    if (!res.ok) {
+      const body = await res.json() as { error?: string }
+      alert(body.error ?? 'Restart failed')
+      setLoading(false)
+      return
+    }
     setLoading(false)
     onRefresh()
     onClose()
