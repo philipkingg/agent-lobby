@@ -304,5 +304,27 @@ export function createDb(path: string = ":memory:"): DatabaseSync {
     migrateV2ToV3(db);
   }
 
+  // Ensure tables that may be missing from partial historical migrations
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS transcript_entries (
+      id TEXT PRIMARY KEY,
+      taskId TEXT NOT NULL,
+      stageId TEXT,
+      type TEXT NOT NULL,
+      content TEXT NOT NULL,
+      timestamp TEXT NOT NULL
+    )
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS worktrees (
+      id TEXT PRIMARY KEY,
+      taskId TEXT NOT NULL,
+      path TEXT NOT NULL,
+      branch TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      createdAt TEXT NOT NULL
+    )
+  `);
+
   return db;
 }

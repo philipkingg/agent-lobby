@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { rmSync, existsSync } from "node:fs";
 import path from "node:path";
 import type { Project } from "./projects.js";
 
@@ -42,12 +43,18 @@ export function removeWorktree(project: Project, taskId: string): void {
   const target = worktreePath(project, taskId);
 
   try {
-    execFileSync("git", ["worktree", "remove", target], {
+    execFileSync("git", ["worktree", "remove", "--force", target], {
       cwd: project.path,
       encoding: "utf-8",
     });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new WorktreeError(`failed to remove worktree for task ${taskId}: ${message}`);
+  } catch {
+    // Worktree may not be registered with git (e.g. directory exists but not tracked).
+    // Fall back to pruning stale refs and removing the directory directly.
+    try {
+      execFileSync("git", ["worktree", "prune"], { cwd: project.path, encoding: "utf-8" });
+    } catch { /* ignore */ }
+    if (existsSync(target)) {
+      rmSync(target, { recursive: true, force: true });
+    }
   }
 }
