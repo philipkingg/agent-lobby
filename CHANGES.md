@@ -4,6 +4,34 @@ This file tracks what has been built. Read it at the start of each new session f
 
 ---
 
+## Phase 24 — Manual Pipeline Control [TODO]
+
+**Goal:** Force a task to any pipeline stage, and assign a specific agent to a task instead of waiting for the scheduler. Essential for debugging, testing, and overriding bad auto-assignments.
+
+### Feature 1: Force Stage
+
+UI: dropdown in `TaskDetailPanel` listing all pipeline stages (`queued:prioritize` → `queued:merge`). "Move" button sets stage + resets status to `queued`. Task becomes visible to scheduler for an agent of the matching job type.
+
+- **`backend/src/app.ts`** — Add `POST /tasks/:id/stage` body `{ stage: TaskStage }`. Validates stage is a known value. If task is currently `running`, rejects (or force-stops first — TBD). Calls `setTaskStage(db, id, stage, 'queued')`. Broadcasts `status` WS event. Clears `pendingQuestion`, `error`.
+- **`frontend/src/App.tsx` — `TaskDetailPanel`** — Add stage selector row (only shown when task is not `running`): `<select>` with all 5 pipeline stages, "Move to stage" button. Calls `POST /tasks/:id/stage`, then `onRefresh()`.
+
+### Feature 2: Assign Agent to Task
+
+UI: dropdown in `TaskDetailPanel` listing idle agents whose job type matches the current stage. "Assign & Run" button bypasses scheduler and immediately dispatches that agent to the task.
+
+- **`backend/src/app.ts`** — Add `POST /tasks/:id/assign` body `{ agentId }`. Validates: task must be `queued` or `new` (not running). Agent must be idle (`currentTaskId IS NULL`, `firedAt IS NULL`). Job type must match the stage (warn but don't block — power user override). Claims task (`status='running'`, `agent.currentTaskId=taskId`), sets station, fires `pipelineRunner.runStage` in background. Returns `{ ok: true }`.
+- **`frontend/src/App.tsx` — `TaskDetailPanel`** — Add agent assignment row (shown when task is `queued` or `new`): dropdown filtered to idle agents. "Assign" button. Calls `POST /tasks/:id/assign`, then `onRefresh()`.
+- **`frontend/src/useGameState.ts`** — Agents already in state; pass to `TaskDetailPanel` as prop.
+
+### Key decisions
+- Force stage on `running` task: reject with 409 — user must wait or delete. Avoids race with active SDK session.
+- Assign mismatched job type: allow with a visual warning badge ("⚠ job type mismatch"). Power user override is useful (e.g. assign an implementer to a review stage for debugging).
+- Force stage resets `reviewLoopCount = 0` — fresh start at that stage.
+- `new` tasks can be assigned directly (assign implicitly releases + runs, skipping the release-to-queue step).
+- No new DB columns needed — purely runtime state manipulation.
+
+---
+
 ## Phase 23 — Hosted Frontend + Configurable Backend URL [TODO]
 
 **Goal:** Frontend deployed to GitHub Pages so it's accessible from any device via URL. Backend still runs locally (needs git/gh/file system). User enters the backend URL once; frontend stores it and reconnects automatically.
