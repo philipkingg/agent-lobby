@@ -4,6 +4,64 @@ This file tracks what has been built. Read it at the start of each new session f
 
 ---
 
+## Phase 23 — Hosted Frontend + Configurable Backend URL [TODO]
+
+**Goal:** Frontend deployed to GitHub Pages so it's accessible from any device via URL. Backend still runs locally (needs git/gh/file system). User enters the backend URL once; frontend stores it and reconnects automatically.
+
+### Architecture
+
+```
+Browser (any device)
+  └── https://philipkingg.github.io/agent-lobby/  (GitHub Pages, static)
+        └── fetch/WebSocket → https://your-tunnel.trycloudflare.com  (Cloudflare Tunnel)
+                                   └── localhost:3001  (backend, runs on your machine)
+```
+
+**Backend exposure:** Cloudflare Tunnel (`cloudflared`) — free, stable HTTPS URL, no port forwarding, no router config. Alternative: ngrok (URL changes on restart) or Tailscale (better for same-owner devices).
+
+### What changes
+
+**`frontend/vite.config.ts`**
+- Add `base: '/agent-lobby/'` for GitHub Pages subdirectory deployment
+- Keep `server.proxy` for local dev (unchanged)
+
+**`frontend/src/useGameState.ts`**
+- Export `getBackendUrl(): string` — reads from `localStorage.getItem('backendUrl') ?? ''`
+- Export `setBackendUrl(url: string)` — saves to localStorage
+- Replace all hardcoded `/api/...` fetch paths with `${getBackendUrl()}/...` (note: proxy strips `/api` prefix already, so backend routes have no prefix — prod calls go directly to `/agents`, `/tasks`, etc.)
+- WebSocket URL: derive from backendUrl (`http` → `ws`, `https` → `wss`, same host/port)
+
+**`frontend/src/App.tsx`**
+- Add `ConnectScreen` component: shown when `backendUrl` is empty or connection fails. Input for backend URL, "Connect" button, brief instructions ("Run cloudflared tunnel on your machine, paste URL here").
+- After successful `GET /health` → save URL, show main app.
+- Settings tab: add "Backend URL" field to change the stored URL.
+
+**`backend/src/app.ts`**
+- Add `@fastify/cors` plugin. Allow all origins in dev; in prod allow the GitHub Pages origin + any `trycloudflare.com` URL (or just allow `*` since backend has no auth anyway).
+- `npm install @fastify/cors`
+
+**`.github/workflows/deploy.yml`** — New file
+- Trigger: push to `main`
+- Steps: `npm ci` in `frontend/`, `npm run build`, deploy `frontend/dist/` to `gh-pages` branch using `peaceiris/actions-gh-pages`
+
+**`backend/package.json`**
+- Add npm script: `"tunnel": "cloudflared tunnel --url http://localhost:3001"` — one command to expose backend
+
+### Setup flow (one-time)
+1. Enable GitHub Pages in repo settings → source: `gh-pages` branch
+2. Push to main → Actions deploys frontend automatically
+3. On the machine running backend: `npm run tunnel` (in backend/) → get URL like `https://abc123.trycloudflare.com`
+4. Open `https://philipkingg.github.io/agent-lobby/` → paste tunnel URL → done
+
+### Key decisions
+- No auth on backend: it's local-only access via tunnel, Cloudflare Tunnel provides HTTPS but no auth gate. Fine for personal use. Could add a simple bearer token check later.
+- `base: '/agent-lobby/'` in vite: required for GitHub Pages subdirectory; assets resolve correctly
+- CORS `*`: backend is personal tool, no sensitive data exposed beyond what you run on your own repos
+- Dev mode unchanged: `vite dev` still proxies to `localhost:3001` — no backend URL input needed in dev (proxy handles it)
+- Health check on connect: `GET /health` returns `{ status: 'ok' }` — use this to validate URL before saving
+
+---
+
 ## Phase 22 — LimeZu Tilemap Rendering [TODO]
 
 **Goal:** Replace solid colored station rectangles with actual LimeZu Modern Interiors tile sprites. Makes the office look like a real pixel-art game instead of colored boxes.
