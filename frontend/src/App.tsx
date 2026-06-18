@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react'
 import './App.css'
 import OfficeCanvas from './OfficeCanvas'
 import { useGameState } from './useGameState'
-import type { GameAgent, GameTask, Project } from './useGameState'
+import type { GameAgent, GameTask, Project, Squad } from './useGameState'
 
-type Tab = 'agents' | 'tasks' | 'pr-wall' | 'settings'
+type Tab = 'agents' | 'tasks' | 'squads' | 'pr-wall' | 'settings'
 
 const STAGE_LABELS: Record<string, string> = {
   'queued:prioritize': 'Prioritize',
@@ -43,7 +43,7 @@ function xpToNextLevel(level: number): number {
   return Math.round(100 * Math.pow(level, 1.5))
 }
 
-function AgentRow({ agent, task, onClick }: { agent: GameAgent; task: GameTask | null; onClick: () => void }) {
+function AgentRow({ agent, task, squadName, onClick }: { agent: GameAgent; task: GameTask | null; squadName?: string; onClick: () => void }) {
   const stationLabel = agent.currentStation
     ? agent.currentStation.replace('-', ' ').replace(/\b\w/g, (c) => c.toUpperCase())
     : 'Idle'
@@ -57,6 +57,11 @@ function AgentRow({ agent, task, onClick }: { agent: GameAgent; task: GameTask |
       {task && (
         <span className="agent-row-task" title={task.title}>
           {task.title.length > 24 ? task.title.slice(0, 24) + '…' : task.title}
+        </span>
+      )}
+      {squadName && (
+        <span style={{ fontSize: '0.65rem', color: '#9c27b0', background: 'rgba(156,39,176,0.12)', borderRadius: 3, padding: '1px 4px' }}>
+          {squadName}
         </span>
       )}
       <span className="agent-row-level">Lv{agent.level}</span>
@@ -410,8 +415,13 @@ function TaskDetailPanel({ task, onClose, onRefresh, onSelectTask }: {
   const deleteTask = async () => {
     if (!confirm(`Delete "${task.title}"?`)) return
     setLoading(true)
-    await fetch(`/api/tasks/${task.id}`, { method: 'DELETE' })
+    const res = await fetch(`/api/tasks/${task.id}`, { method: 'DELETE' })
     setLoading(false)
+    if (!res.ok) {
+      const body = await res.json() as { error?: string }
+      alert(body.error ?? 'Delete failed')
+      return
+    }
     onRefresh()
     onClose()
   }
@@ -531,6 +541,186 @@ function TaskDetailPanel({ task, onClose, onRefresh, onSelectTask }: {
   )
 }
 
+function SquadsTab({ squads, agents, projects, onRefresh }: {
+  squads: Squad[]
+  agents: GameAgent[]
+  projects: Project[]
+  onRefresh: () => void
+}) {
+  const [newSquadName, setNewSquadName] = useState('')
+  const [newSquadProjects, setNewSquadProjects] = useState<string[]>([])
+  const [creating, setCreating] = useState(false)
+
+  const createSquad = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newSquadName.trim()) return
+    setCreating(true)
+    await fetch('/api/squads', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newSquadName.trim(), projectIds: newSquadProjects }),
+    })
+    setNewSquadName('')
+    setNewSquadProjects([])
+    setCreating(false)
+    onRefresh()
+  }
+
+  const deleteSquad = async (id: string, name: string) => {
+    if (!confirm(`Delete squad "${name}"? Agents will be unassigned.`)) return
+    await fetch(`/api/squads/${id}`, { method: 'DELETE' })
+    onRefresh()
+  }
+
+  const addAgentToSquad = async (squadId: string, agentId: string) => {
+    await fetch(`/api/squads/${squadId}/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId }),
+    })
+    onRefresh()
+  }
+
+  const removeAgentFromSquad = async (squadId: string, agentId: string) => {
+    await fetch(`/api/squads/${squadId}/agents/${agentId}`, { method: 'DELETE' })
+    onRefresh()
+  }
+
+  const toggleProject = async (squadId: string, currentIds: string[], projectId: string) => {
+    const next = currentIds.includes(projectId)
+      ? currentIds.filter((id) => id !== projectId)
+      : [...currentIds, projectId]
+    await fetch(`/api/squads/${squadId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectIds: next }),
+    })
+    onRefresh()
+  }
+
+  return (
+    <div className="squads-tab">
+      <h4>Squads</h4>
+      <p className="dim" style={{ fontSize: '0.72rem', marginTop: 0 }}>
+        Agents in a squad only pick up tasks from that squad's projects.
+      </p>
+
+      {/* Create squad form */}
+      <form onSubmit={createSquad} style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', marginBottom: '0.75rem' }}>
+        <input
+          type="text"
+          placeholder="Squad name…"
+          value={newSquadName}
+          onChange={(e) => setNewSquadName(e.target.value)}
+          style={{ width: '100%', boxSizing: 'border-box' }}
+        />
+        {projects.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+            {projects.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setNewSquadProjects((prev) =>
+                  prev.includes(p.id) ? prev.filter((id) => id !== p.id) : [...prev, p.id]
+                )}
+                style={{
+                  fontSize: '0.7rem',
+                  padding: '2px 8px',
+                  borderColor: newSquadProjects.includes(p.id) ? 'var(--accent)' : undefined,
+                  color: newSquadProjects.includes(p.id) ? 'var(--accent)' : undefined,
+                }}
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+        )}
+        <button className="btn-primary" type="submit" disabled={creating || !newSquadName.trim()}>
+          {creating ? 'Creating…' : 'Create Squad'}
+        </button>
+      </form>
+
+      {squads.length === 0 && <p className="dim">No squads yet.</p>}
+
+      {squads.map((squad) => {
+        const squadProjectIds: string[] = (() => { try { return JSON.parse(squad.projectIds) as string[] } catch { return [] } })()
+        const squadAgents = agents.filter((a) => a.squadId === squad.id)
+        const unassignedAgents = agents.filter((a) => !a.squadId || a.squadId !== squad.id)
+
+        return (
+          <div key={squad.id} className="squad-card">
+            <div className="squad-card-header">
+              <span className="squad-name">{squad.name}</span>
+              <button
+                onClick={() => void deleteSquad(squad.id, squad.name)}
+                style={{ fontSize: '0.65rem', color: 'var(--danger)', borderColor: 'var(--danger)', padding: '1px 6px' }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Projects */}
+            <div style={{ marginBottom: '0.35rem' }}>
+              <span className="dim" style={{ fontSize: '0.7rem' }}>Projects: </span>
+              {squadProjectIds.length === 0 && <span className="dim" style={{ fontSize: '0.7rem' }}>all</span>}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.2rem', marginTop: '0.2rem' }}>
+                {projects.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => void toggleProject(squad.id, squadProjectIds, p.id)}
+                    style={{
+                      fontSize: '0.65rem',
+                      padding: '1px 6px',
+                      borderColor: squadProjectIds.includes(p.id) ? 'var(--accent)' : undefined,
+                      color: squadProjectIds.includes(p.id) ? 'var(--accent)' : 'var(--text-dim)',
+                    }}
+                  >
+                    {squadProjectIds.includes(p.id) ? '✓ ' : ''}{p.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Agents */}
+            <div>
+              <span className="dim" style={{ fontSize: '0.7rem' }}>Agents: </span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.2rem', marginTop: '0.2rem' }}>
+                {squadAgents.map((a) => (
+                  <span key={a.id} className="squad-agent-pill">
+                    {a.name}
+                    <button
+                      onClick={() => void removeAgentFromSquad(squad.id, a.id)}
+                      style={{ marginLeft: '4px', fontSize: '0.65rem', color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, lineHeight: 1 }}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                {unassignedAgents.length > 0 && (
+                  <select
+                    value=""
+                    onChange={(e) => { if (e.target.value) void addAgentToSquad(squad.id, e.target.value) }}
+                    style={{ fontSize: '0.65rem', padding: '1px 4px', borderRadius: 3 }}
+                  >
+                    <option value="">+ Add agent</option>
+                    {unassignedAgents.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name} ({a.jobType})</option>
+                    ))}
+                  </select>
+                )}
+                {squadAgents.length === 0 && unassignedAgents.length === 0 && (
+                  <span className="dim" style={{ fontSize: '0.7rem' }}>No agents hired</span>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function SettingsTab({ onRefresh, zoomSensitivity, onZoomSensitivity, projects }: {
   onRefresh: () => void
   zoomSensitivity: number
@@ -646,13 +836,14 @@ function SettingsTab({ onRefresh, zoomSensitivity, onZoomSensitivity, projects }
 }
 
 export default function App() {
-  const { agents, tasks, userProfile, projects, refetchAgents, refetchTasks, refetchAll } = useGameState()
+  const { agents, tasks, userProfile, projects, squads, refetchAgents, refetchTasks, refetchSquads, refetchAll } = useGameState()
   const [tab, setTab] = useState<Tab>('agents')
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [zoomSensitivity, setZoomSensitivity] = useState(0.08)
 
   const taskById = new Map(tasks.map((t) => [t.id, t]))
+  const squadById = new Map(squads.map((s) => [s.id, s]))
   const selectedAgent = selectedAgentId ? agents.find((a) => a.id === selectedAgentId) : null
   const selectedTask = selectedAgent?.currentTaskId ? taskById.get(selectedAgent.currentTaskId) : null
   const selectedTaskDetail = selectedTaskId ? taskById.get(selectedTaskId) : null
@@ -692,8 +883,9 @@ export default function App() {
           <div className="tab-bar">
             <button className={tab === 'agents' ? 'tab active' : 'tab'} onClick={() => setTab('agents')}>Agents</button>
             <button className={tab === 'tasks' ? 'tab active' : 'tab'} onClick={() => setTab('tasks')}>Tasks</button>
+            <button className={tab === 'squads' ? 'tab active' : 'tab'} onClick={() => setTab('squads')}>Squads</button>
             <button className={tab === 'pr-wall' ? 'tab active' : 'tab'} onClick={() => setTab('pr-wall')}>PRs</button>
-            <button className={tab === 'settings' ? 'tab active' : 'tab'} onClick={() => setTab('settings')}>Settings</button>
+            <button className={tab === 'settings' ? 'tab active' : 'tab'} onClick={() => setTab('settings')}>⚙</button>
           </div>
 
           <div className="tab-content">
@@ -707,6 +899,7 @@ export default function App() {
                       key={agent.id}
                       agent={agent}
                       task={agent.currentTaskId ? (taskById.get(agent.currentTaskId) ?? null) : null}
+                      squadName={agent.squadId ? squadById.get(agent.squadId)?.name : undefined}
                       onClick={() => setSelectedAgentId((prev) => (prev === agent.id ? null : agent.id))}
                     />
                   ))}
@@ -761,6 +954,8 @@ export default function App() {
                 )}
               </div>
             )}
+
+            {tab === 'squads' && <SquadsTab squads={squads} agents={agents} projects={projects} onRefresh={refetchSquads} />}
 
             {tab === 'pr-wall' && <PrWallTab tasks={tasks} />}
 

@@ -652,3 +652,55 @@
   background: var(--accent-soft);
   border-color: var(--accent);
 }
+
+/* ── Squads tab ── */
+
+.squads-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.squads-tab h4 {
+  margin: 0.25rem 0 0;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-family: var(--mono);
+}
+
+.squad-card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.squad-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.squad-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.squad-agent-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.68rem;
+  color: #9c27b0;
+  background: rgba(156,39,176,0.1);
+  border: 1px solid rgba(156,39,176,0.3);
+  border-radius: 3px;
+  padding: 1px 5px;
+}

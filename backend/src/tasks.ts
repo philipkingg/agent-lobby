@@ -302,10 +302,14 @@ export function restartTask(db: DatabaseSync, id: string): Task | null {
 }
 
 export function deleteTask(db: DatabaseSync, id: string): void {
-  // Cascade delete child tasks first
-  const children = db.prepare(`SELECT id FROM tasks WHERE parentTaskId = ?`).all(id) as { id: string }[];
-  for (const child of children) {
-    deleteTask(db, child.id);
+  // Cascade delete child tasks (requires schema v3 parentTaskId column)
+  try {
+    const children = db.prepare(`SELECT id FROM tasks WHERE parentTaskId = ?`).all(id) as { id: string }[];
+    for (const child of children) {
+      deleteTask(db, child.id);
+    }
+  } catch {
+    // parentTaskId column may not exist on older schema — safe to skip cascade
   }
   db.prepare(`DELETE FROM transcript_entries WHERE taskId = ?`).run(id);
   db.prepare(`DELETE FROM task_stages WHERE taskId = ?`).run(id);

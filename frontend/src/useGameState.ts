@@ -50,13 +50,21 @@ export interface Project {
   createdAt: string
 }
 
+export interface Squad {
+  id: string
+  name: string
+  projectIds: string // JSON-encoded string[]
+}
+
 interface GameState {
   agents: GameAgent[]
   tasks: GameTask[]
   userProfile: UserProfile | null
   projects: Project[]
+  squads: Squad[]
   refetchTasks: () => void
   refetchAgents: () => void
+  refetchSquads: () => void
   refetchAll: () => void
 }
 
@@ -65,6 +73,7 @@ export function useGameState(): GameState {
   const [tasks, setTasks] = useState<GameTask[]>([])
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
+  const [squads, setSquads] = useState<Squad[]>([])
   const wsRef = useRef<WebSocket | null>(null)
 
   const fetchAgents = () =>
@@ -91,11 +100,18 @@ export function useGameState(): GameState {
       .then(setProjects)
       .catch(() => {})
 
+  const fetchSquads = () =>
+    fetch('/api/squads')
+      .then((r) => r.ok ? r.json() : Promise.reject())
+      .then(setSquads)
+      .catch(() => {})
+
   const fetchAll = () => {
     void fetchAgents()
     void fetchTasks()
     void fetchProfile()
     void fetchProjects()
+    void fetchSquads()
   }
 
   useEffect(() => {
@@ -168,8 +184,10 @@ export function useGameState(): GameState {
     tasks,
     userProfile,
     projects,
+    squads,
     refetchTasks: fetchTasks,
     refetchAgents: fetchAgents,
+    refetchSquads: fetchSquads,
     refetchAll: fetchAll,
   }
 }

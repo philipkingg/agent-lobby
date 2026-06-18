@@ -4,6 +4,24 @@ This file tracks what has been built. Read it at the start of each new session f
 
 ---
 
+## Phase 8 — Squad Management UI [DONE]
+
+**Goal:** Build the Squad tab so you can create squads, assign agents to them, and assign projects. Agents in a squad only pick up tasks for that squad's projects (enforced by AgentScheduler).
+
+### What changed
+- `frontend/src/useGameState.ts` — added `Squad` interface (`id, name, projectIds: string`), `squads: Squad[]` state, `fetchSquads`, `refetchSquads` exposed in return value.
+- `frontend/src/App.tsx` — added `'squads'` to `Tab` type. Added `SquadsTab` component: create-squad form (name + project multi-select), squad card per squad (name, toggle projects, agent pills with × remove, "Add agent" dropdown). Squad badge (purple pill) on `AgentRow` showing squad name. Settings tab label changed to ⚙ to make tab bar fit. `squadById` map built from squads list. `App` destructures `squads` + `refetchSquads`.
+- `frontend/src/App.css` — added `.squads-tab`, `.squad-card`, `.squad-card-header`, `.squad-name`, `.squad-agent-pill` styles.
+- `backend/src/tasks.ts` — wrapped children cascade query in try/catch so `deleteTask` doesn't throw when `parentTaskId` column doesn't exist (schema migration timing guard). Frontend delete now checks `res.ok` and shows error alert on failure.
+
+### Key decisions
+- Agents with no squad pick up tasks from any project (existing scheduler behavior)
+- Project assignment in squads is toggle-based (click to add/remove) — no save button needed
+- "Add agent" dropdown only shows agents NOT already in this squad
+- Squad badge on agent row shows at a glance which squad each agent belongs to
+
+---
+
 ## Phase 7 — Epic / Ticket Splitting [DONE]
 
 **Goal:** Planners can split complex tasks into multiple subtasks (Jira-style epics). Each subtask goes through the full pipeline independently. Parent task is marked `split` and shows children in the UI.
