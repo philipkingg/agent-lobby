@@ -1220,7 +1220,7 @@ export default function App() {
                                 e.stopPropagation()
                                 setExpandedEpics((prev) => {
                                   const next = new Set(prev)
-                                  if (next.has(t.id)) next.delete(t.id) else next.add(t.id)
+                                  if (next.has(t.id)) next.delete(t.id); else next.add(t.id)
                                   return next
                                 })
                               } : undefined}
