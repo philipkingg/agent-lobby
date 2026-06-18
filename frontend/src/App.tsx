@@ -353,7 +353,7 @@ function TaskDetailPanel({ task, onClose, onRefresh, onSelectTask }: {
       .then((r) => r.ok ? r.json() : Promise.reject())
       .then(setStages)
       .catch(() => {})
-  }, [task.id, task.status])
+  }, [task.id, task.updatedAt])
 
   useEffect(() => {
     if (task.status === 'split') {
@@ -368,7 +368,7 @@ function TaskDetailPanel({ task, onClose, onRefresh, onSelectTask }: {
         .then(setParentTask)
         .catch(() => {})
     }
-  }, [task.id, task.status, task.parentTaskId])
+  }, [task.id, task.updatedAt, task.parentTaskId])
 
   const respond = async () => {
     if (!answer.trim()) return

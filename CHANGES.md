@@ -4,6 +4,59 @@ This file tracks what has been built. Read it at the start of each new session f
 
 ---
 
+## Phase 10 — Auditor / Manager Agent [TODO]
+
+**Goal:** A new `auditor` job type that observes completed work across all agent types, scores their efficiency, and proposes targeted edits to the `agents/{type}.md` knowledge files. Closes the feedback loop — the system improves its own agents over time.
+
+### What the auditor does
+
+1. **Reads performance signals** — for each recently-completed task stage:
+   - How many review loops (reviewLoopCount) before merge?
+   - Did the agent get stuck? How many times?
+   - Did the planner split or not, and was the split appropriate?
+   - Token cost proxy: transcript length
+   - Time spent (completedAt − startedAt on task_stages)
+2. **Reads the transcript** — looks at what the agent actually did, what it got wrong, what it had to re-do
+3. **Reads the current `agents/{type}.md`** — understands what the agent was told
+4. **Outputs a diff** — specific additions/removals to the knowledge file: new gotchas, corrected instructions, missing context, better output format examples
+5. **Does NOT auto-apply** — presents the suggestion to the human (pending question / awaiting_approval flow). Human approves → auditor writes the file.
+
+### New agent type
+
+- `jobType: "auditor"` — add to the DB CHECK constraint and all relevant lists
+- No specific stage in the pipeline — auditor is triggered differently (periodic cron, or after N tasks complete, or manually)
+- Station: `audit-desk` (or reuse `planning` desk) in the office layout
+
+### Trigger options (decide at implementation time)
+- Manual: button in UI "Run Audit"
+- Automatic: after every 5 tasks reach `done` status, trigger an audit pass
+- Scheduled: cron job every X hours
+
+### Data the auditor needs
+- `GET /agents` filtered by job type
+- `GET /tasks?status=done` (last N completed)
+- `GET /tasks/:id/stages` for time/loop data
+- `GET /tasks/:id/transcript` for qualitative review
+- Read access to `agents/{type}.md` files
+- Write access to propose changes (or a `POST /agents/knowledge/:type` endpoint)
+
+### Implementation steps
+1. Add `auditor` to `jobType` CHECK constraint in DB schema (new migration)
+2. Add `auditor` to hire form in UI
+3. Create `agents/auditor.md` describing what to look for and how to format suggestions
+4. Add `POST /audit/run` endpoint that picks the most-qualified idle auditor and dispatches an audit session
+5. Build audit stage prompt: inject performance data + current knowledge files + task transcripts
+6. Handle output: auditor outputs `KNOWLEDGE_UPDATE: {type}: {markdown diff}` → stored as pending suggestion
+7. Frontend: show pending knowledge suggestions in a new "Audit" panel, with approve/reject per suggestion
+8. On approval: write the file change, broadcast
+
+### Key decisions to make
+- Scope per audit run: audit one agent type at a time vs all types in one session
+- How many tasks to review per audit (last 10? last 20 per type?)
+- Whether to show the auditor's reasoning or just the proposed edit
+
+---
+
 ## Phase 9 — Agent Knowledge Files [TODO]
 
 **Goal:** Give each agent type a persistent knowledge file (`agent-{type}.md`) that is injected into their stage prompt. Acts like onboarding docs — common lookup patterns, codebase conventions, file structure, testing approach, gotchas. Agents stop wasting tokens re-discovering the same things every run.
