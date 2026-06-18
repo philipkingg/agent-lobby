@@ -250,21 +250,31 @@ function parseEntry(entry: TranscriptEntry): TranscriptLine[] {
     const msg = JSON.parse(entry.content) as Record<string, unknown>
 
     if (entry.type === 'assistant') {
+      // SDK may embed tool_use in message.content, or content directly
       const message = msg.message as { content?: Array<{ type: string; text?: string; name?: string; input?: Record<string, unknown> }> } | undefined
-      const blocks = message?.content ?? []
+      const directContent = msg.content as Array<{ type: string; text?: string; name?: string; input?: Record<string, unknown> }> | undefined
+      const blocks = message?.content ?? directContent ?? []
       return blocks.flatMap((b): TranscriptLine[] => {
         if (b.type === 'text' && b.text?.trim()) {
           return [{ kind: 'text', label: 'AI', body: b.text.trim() }]
         }
         if (b.type === 'tool_use' && b.name) {
-          // Build a short readable summary of the tool call
           const input = b.input ?? {}
           const firstVal = Object.values(input)[0]
-          const hint = typeof firstVal === 'string' ? ` ${firstVal.slice(0, 60)}` : ''
-          return [{ kind: 'tool', label: b.name, body: hint.trim() }]
+          const hint = typeof firstVal === 'string' ? firstVal.slice(0, 60) : ''
+          return [{ kind: 'tool', label: b.name, body: hint }]
         }
         return []
       })
+    }
+
+    // SDK may yield tool_use as a top-level message type (not embedded in assistant)
+    if (entry.type === 'tool_use') {
+      const name = (msg.name as string | undefined) ?? 'tool'
+      const input = (msg.input as Record<string, unknown> | undefined) ?? {}
+      const firstVal = Object.values(input)[0]
+      const hint = typeof firstVal === 'string' ? firstVal.slice(0, 60) : ''
+      return [{ kind: 'tool', label: name, body: hint }]
     }
 
     if (entry.type === 'result') {
