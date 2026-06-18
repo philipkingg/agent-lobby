@@ -1104,8 +1104,15 @@ export default function App() {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [expandedEpics, setExpandedEpics] = useState<Set<string>>(new Set())
-  const [zoomSensitivity, setZoomSensitivity] = useState(0.08)
+  const [zoomSensitivity, setZoomSensitivity] = useState<number>(() => {
+    const stored = localStorage.getItem('zoomSensitivity')
+    return stored !== null ? Number(stored) : 0.08
+  })
   const [schedulerRunning, setSchedulerRunning] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    localStorage.setItem('zoomSensitivity', String(zoomSensitivity))
+  }, [zoomSensitivity])
 
   useEffect(() => {
     const fetchStatus = () =>
